@@ -1,0 +1,2400 @@
+---
+title: "fungi_analysis"
+format: html
+---
+
+```{r, message=FALSE, results='hide'}
+knitr::opts_knit$set(root.dir = '~/Documents/Postdoc/Research_paper/Molecular_data/R')
+getwd()
+```
+
+```{r}
+library(Hmisc)
+library(bbmle)
+library(nlme)
+library(car)
+library(ggplot2)
+library(vegan)
+library(grid)
+library(ggrepel)
+library(dplyr)
+library(sp)
+library(gstat)
+library(gridExtra)
+library(iCAMP)
+library(tibble)
+library(tidyr)
+library(ggplot2)
+library(dplyr)
+library(writexl)
+
+```
+
+# Rarefaction curve
+
+```{r}
+OTU_table_total_fungi <- read.csv("Total_fungi/dataset1/dataset1.csv", row.names = 1, header = TRUE)
+OTU_table_AM_fungi <- read.csv("AM_fungi/dataset1/dataset1.csv", row.names = 1, header = TRUE)
+
+
+OTU_table_total_fungi_t <- t(OTU_table_total_fungi)
+
+OTU_table_AM_fungi_t <- t(OTU_table_AM_fungi)
+
+library(vegan)
+
+# Set up a 1x2 layout for the plots (side by side)
+png("combined_rarefaction_curves.tiff", width = 1400, height = 700, res = 200)
+
+# Adjust the outer margins and inner plot sizes
+par(mfrow = c(1, 2),           # Layout: 1 row and 2 columns
+    mar = c(1, 1, 1, 1),       # Increased margins for better spacing (bottom, left, top, right)
+    oma = c(1, 1, 1, 2),       # Outer margins (space between the plots)
+    pin = c(1.5, 1.5))             # Increased plot size for readability
+
+# Plot for Total Fungi
+rarecurve(
+  OTU_table_total_fungi_t,
+  step = 500,
+  col = rainbow(nrow(OTU_table_total_fungi_t)),
+  cex = 0.7,
+  label = FALSE,
+  xlab = "Sequencing Depth",
+  ylab = "Number of total fungal OTUs",
+  title = "Total fungi",
+  cex.axis = 1,
+  cex.lab = 1
+)
+
+# Plot for AM Fungi
+rarecurve(
+  OTU_table_AM_fungi_t,
+  step = 500,
+  col = rainbow(nrow(OTU_table_AM_fungi_t)),
+  cex = 0.9,
+  label = FALSE,
+  xlab = "Sequencing Depth",
+  ylab = "Number of AM fungal VTs",
+   title = "Total fungi",
+  cex.axis = 1,
+  cex.lab = 1
+)
+
+# Close the PNG device
+dev.off()
+
+
+
+```
+# Fungal functional group classification
+```{bash}
+source/opt/anaconda3/bin/activate
+conda activate
+cd ~/Total_fungi/dataset1/FungalGuild/
+python Guilds_v1.1.py -otu funguild.txt -db fungi
+conda deactivate
+```
+
+# Richness calculation
+```{r}
+OTU_table_total_fungi <- read.csv("Total_fungi/dataset1/dataset1.csv", row.names = 1, header = TRUE)
+
+OTU_table_AM_fungi <- read.csv("AM_fungi/dataset1/dataset1.csv", row.names = 1, header = TRUE)
+
+# Saprotrophic fungi
+OTU_Saprotrophs<- read.csv("Total_fungi/dataset1/FungalGuild/saprophytic_fungi.csv", row.names = 1, header = TRUE)
+
+# Pathogenic fungi
+OTU_Pathotrophs<- read.csv("Total_fungi/dataset1/FungalGuild/pathogenic_fungi.csv", row.names = 1, header = TRUE)
+
+
+library(iNEXT)
+# Total fungi
+SC <- DataInfo(OTU_table_total_fungi, datatype = "abundance")$SC
+SC
+print(SC) 
+out <- estimateD(OTU_table_total_fungi, q = 0, datatype = "abundance", base = "coverage", level = 0.99)
+write_xlsx(out, "Total_fungi/dataset1/richness.xlsx", col_names = TRUE)
+
+# AM Fungi
+SC <- DataInfo(OTU_table_AM_fungi, datatype = "abundance")$SC
+print(SC) 
+out <- estimateD(OTU_table_AM_fungi, q = 0, datatype = "abundance", base = "coverage", level = 0.99)
+write_xlsx(out, "AM_fungi/dataset1/richness.xlsx", col_names = TRUE)
+
+# Saprotrophic fungi
+SC <- DataInfo(OTU_Saprotrophs, datatype = "abundance")$SC
+print(SC)
+out <- estimateD(OTU_Saprotrophs, q = 0, datatype = "abundance", base = "coverage", level = 0.99)
+write_xlsx(out, "Total_fungi/dataset1/FungalGuild/richness_saprophytic_fungi.xlsx", col_names = TRUE)
+
+# Pathogenic fungi
+SC <- DataInfo(OTU_Pathotrophs, datatype = "abundance")$SC
+print(SC)
+out <- estimateD(OTU_Pathotrophs, q = 0, datatype = "abundance", base = "coverage", level = 0.95)
+write_xlsx(out, "Total_fungi/dataset1/FungalGuild/richness_pathogenic_fungi.xlsx", col_names = TRUE)
+
+```
+
+
+# Richness
+
+```{r}
+richness <- read.csv("richness.csv")
+richness$forest <- as.factor(richness$forest)
+richness$season <- as.factor(richness$season)
+richness$forest_season <- paste(
+  richness$forest, 
+  richness$season, sep = " - ")
+
+richness$forest <- factor(richness$forest, 
+                                levels = c("RM", "NF", "AF", "SF"))
+richness$forest_season <- factor(
+  richness$forest_season, levels = c("RM - Wet", "RM - Dry",  
+               "NF - Wet" , "NF - Dry" , 
+              "AF - Wet", "AF - Dry" ,
+             "SF - Wet" , "SF - Dry" ))
+# Jitter latitude and longitude with small amount
+richness$latitude_jitter <- jitter(richness$latitude, amount = 0.00001)  # Adjust amount as needed
+richness$longitude_jitter <- jitter(richness$longitude, amount = 0.00001)  # Adjust amount as needed
+
+AM_fungi <- richness[1:32,]
+Total_fungi <- richness[33:64,]
+Saprophytic_fungi <- richness[65:96,]
+Pathogenic_fungi <- richness[97:128,]
+
+shapiro.test(AM_fungi$richness)
+shapiro.test(Total_fungi$richness)
+shapiro.test(Saprophytic_fungi$richness)
+shapiro.test(Pathogenic_fungi$richness)
+
+```
+
+## Spatial autocorrelation
+
+```{r}
+library(nlme)
+library(sp)
+library(gstat)
+library(spdep)
+# Total fungi
+coords_jitter <- data.frame(Total_fungi$latitude_jitter, Total_fungi$longitude_jitter)
+
+# Fit the model
+mod_total_fungi <- lm(richness ~ forest * season, data = Total_fungi)
+
+# Check residuals
+Total_fungi$residuals <- residuals(mod_total_fungi)
+
+# Define coordinates for your spatial data
+coords <- cbind(Total_fungi$longitude_jitter, Total_fungi$latitude_jitter)
+
+# Create a spatial weights matrix (e.g., using nearest neighbors)
+nb <- knn2nb(knearneigh(coords, k = 8))  # k = 4 for nearest neighbors, adjust if necessary
+
+# Convert to spatial weights list
+lw <- nb2listw(nb, style = "W")
+
+# Perform Moran's I test on residuals
+moran_test <- moran.test(Total_fungi$residuals, lw)
+
+# Print Moran's I results
+print(moran_test)
+
+### AM fungi
+# Fit the model
+mod_AM_fungi <- lm(richness ~ forest * season, data = AM_fungi)
+
+# Check residuals
+AM_fungi$residuals <- residuals(mod_AM_fungi)
+
+# Define coordinates for your spatial data
+coords <- cbind(AM_fungi$longitude_jitter, AM_fungi$latitude_jitter)
+
+# Create a spatial weights matrix (e.g., using nearest neighbors)
+nb <- knn2nb(knearneigh(coords, k = 8))  # k = 4 for nearest neighbors, adjust if necessary
+
+# Convert to spatial weights list
+lw <- nb2listw(nb, style = "W")
+
+# Perform Moran's I test on residuals
+moran_test <- moran.test(AM_fungi$residuals, lw)
+
+# Print Moran's I results
+print(moran_test)
+
+```
+
+## Regression
+
+```{r}
+mod_total_fungi <- lm(richness ~ forest * season, data = Total_fungi)
+summary(mod_total_fungi)
+shapiro.test(residuals(mod_total_fungi))
+car::Anova(mod_total_fungi, method = "LR")
+emm <- emmeans(mod_total_fungi, ~ forest * season)
+summary(emm, infer = c(TRUE, TRUE))  # includes CIs
+emm_df_total_fungi <- as.data.frame(emm)
+emm_df_total_fungi$forest_season <- paste(
+  emm_df_total_fungi$forest, 
+  emm_df_total_fungi$season, sep = " - ")
+emm_df_total_fungi$forest_season <- factor(
+  emm_df_total_fungi$forest_season, levels = c("RM - Wet", "RM - Dry",  
+               "NF - Wet" , "NF - Dry" , 
+              "AF - Wet", "AF - Dry" ,
+             "SF - Wet" , "SF - Dry" ))
+emm_df_total_fungi$forest <- factor(emm_df_total_fungi$forest, 
+                                levels = c("RM", "NF", "AF", "SF"))
+Plot_total_fungi <- ggplot() +
+  geom_jitter(data = Total_fungi, 
+              aes(x = forest, 
+                  y = richness, 
+                  group = forest_season), 
+              color = "grey60", 
+              alpha = 0.2, 
+              size = 1, 
+              position = position_dodge(0.5)) +
+  geom_point(data = emm_df_total_fungi, 
+             aes(x = forest, 
+                 y = emmean, 
+                 color = forest_season), 
+             size = 2.5, 
+             shape = 16,
+             alpha = 0.5, 
+             position = position_dodge(width = 0.5)) + 
+  geom_errorbar(data = emm_df_total_fungi, 
+                aes(x = forest, 
+                    ymin = lower.CL, 
+                    ymax = upper.CL, 
+                    color = forest_season),
+                width = 0.2, 
+                linewidth = 0.4,
+                alpha = 0.5,
+                position = position_dodge(width = 0.5)) +
+  ylab("Species richness") +
+  xlab("Forest type") +
+  theme(legend.position = "none",
+        axis.title = element_text(size = 10),
+        axis.text = element_text(size = 9),
+        axis.line = element_line(size = 0.05), 
+        panel.grid = element_blank(),
+        panel.background = element_rect(fill = "transparent", 
+                                        color = "black",size = 0.5)) +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.2))) +
+  scale_color_manual(
+    values = c("RM - Wet" = "cyan3", 
+               "RM - Dry" = "pink3",
+               "NF - Wet" = "cyan3", 
+               "NF - Dry" = "pink3", 
+              "AF - Wet" = "cyan3", 
+               "AF - Dry" = "pink3",
+             "SF - Wet" = "cyan3", 
+               "SF - Dry" = "pink3"))+
+  geom_point(data = data.frame(x = 3.8, y = 500), 
+             aes(x = x, y = y), 
+             shape = 16, 
+             size = 2, 
+             color = "cyan3", 
+             fill = "cyan3",
+             alpha=0.5) +
+  geom_text(data = data.frame(x = 4.1, y = 500, label = "Wet"),
+            aes(x = x, y = y, label = label), 
+            size = 2, color = "black") +
+
+  # Circle before the "Dry Season" text annotation
+  geom_point(data = data.frame(x = 3.8, y = 410), 
+             aes(x = x, y = y), 
+             shape = 16, 
+             size = 2, 
+             color = "pink3", 
+             fill = "pink3",
+             alpha=0.5) +
+  geom_text(data = data.frame(x = 4.1, y = 410, label = "Dry"),
+            aes(x = x, y = y, label = label), 
+            size = 2, color = "black")+
+  annotate("text", x = 0.5, y = 1450, lineheight = 0.8, label = paste("Forest types: F = 18.7***", "\nSeason: F = 21.9***", "\nForest types × Season: F = 3.1*"), size = 2.5, hjust = 0)
+
+Plot_total_fungi
+
+
+mod_AM_fungi <- lm(richness ~ forest * season, data = AM_fungi)
+summary(mod_AM_fungi)
+shapiro.test(residuals(mod_AM_fungi))
+car::Anova(mod_AM_fungi, method = "LR")
+emm_AM_fungi <- emmeans(mod_AM_fungi, ~ forest * season)
+summary(emm_AM_fungi, infer = c(TRUE, TRUE))  # includes CIs
+
+emm_df_AM_fungi <- as.data.frame(emm_AM_fungi)
+emm_df_AM_fungi$forest_season <- paste(
+  emm_df_AM_fungi$forest, 
+  emm_df_AM_fungi$season, sep = " - ")
+emm_df_AM_fungi$forest_season <- factor(
+  emm_df_AM_fungi$forest_season, levels = c("RM - Wet", "RM - Dry",  
+               "NF - Wet" , "NF - Dry" , 
+               "AF - Wet", "AF - Dry" ,
+               "SF - Wet" , "SF - Dry" ))
+emm_df_AM_fungi$forest <- factor(emm_df_AM_fungi$forest, 
+                                 levels = c("RM", "NF", "AF", "SF"))
+
+Plot_AM_fungi <- ggplot() +
+  geom_jitter(data = AM_fungi, 
+              aes(x = forest, 
+                  y = richness, 
+                  group = forest_season), 
+              color = "grey60", 
+              alpha = 0.2, 
+              size = 1, 
+              position = position_dodge(0.5)) +
+  geom_point(data = emm_df_AM_fungi, 
+             aes(x = forest, 
+                 y = emmean, 
+                 color = forest_season), 
+             size = 2.5, 
+             shape = 16,
+             alpha = 0.5, 
+             position = position_dodge(width = 0.5)) + 
+  geom_errorbar(data = emm_df_AM_fungi, 
+                aes(x = forest, 
+                    ymin = lower.CL, 
+                    ymax = upper.CL, 
+                    color = forest_season),
+                width = 0.2, 
+                linewidth = 0.4,
+                alpha = 0.5,
+                position = position_dodge(width = 0.5)) + 
+  ylab("Species richness") +
+  xlab("Forest type") +
+  theme(legend.position = "none",
+        axis.title = element_text(size = 10),
+        axis.text = element_text(size = 9),
+        axis.line = element_line(size = 0.05),
+        panel.grid = element_blank(),
+        panel.background = element_rect(fill = "transparent", 
+                                        color = "black",size = 0.5)) +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.2))) +
+  scale_color_manual(
+    values = c("RM - Wet" = "cyan3", 
+               "RM - Dry" = "pink3",
+               "NF - Wet" = "cyan3", 
+               "NF - Dry" = "pink3", 
+               "AF - Wet" = "cyan3", 
+               "AF - Dry" = "pink3",
+               "SF - Wet" = "cyan3", 
+               "SF - Dry" = "pink3"))+
+  geom_point(data = data.frame(x = 3.8, y = 13), 
+             aes(x = x, y = y), 
+             shape = 16, 
+             size = 2, 
+             color = "cyan3", 
+             fill = "cyan3",
+             alpha=0.5) +
+  geom_text(data = data.frame(x = 4.1, y = 13, label = "Wet"),
+            aes(x = x, y = y, label = label), 
+            size = 2, color = "black") +
+
+  # Circle before the "Dry Season" text annotation
+  geom_point(data = data.frame(x = 3.8, y = 10), 
+             aes(x = x, y = y), 
+             shape = 16, 
+             size = 2, 
+             color = "pink3", 
+             fill = "pink3",
+             alpha=0.5) +
+  geom_text(data = data.frame(x = 4.1, y = 10, label = "Dry"),
+            aes(x = x, y = y, label = label), 
+            size = 2, color = "black")+
+  annotate("text", x = 0.5, y = 50, lineheight = 0.8, label = paste("Forest types: F = 9.1***", "\nSeason: F = 0.7", "\nForest types × Season: F = 5.7**"), size = 2.5, hjust = 0)
+
+Plot_AM_fungi
+
+
+mod_Saprotroph <- lm(richness ~ forest * season, data = Saprophytic_fungi)
+summary(mod_Saprotroph)
+shapiro.test(residuals(mod_Saprotroph))
+car::Anova(mod_Saprotroph, method = "LR")
+emm_Saprotroph <- emmeans(mod_Saprotroph, ~ forest * season)
+summary(emm_Saprotroph, infer = c(TRUE, TRUE))  # includes CIs
+
+emm_df_Saprotroph <- as.data.frame(emm_Saprotroph)
+emm_df_Saprotroph$forest_season <- paste(
+  emm_df_Saprotroph$forest, 
+  emm_df_Saprotroph$season, sep = " - ")
+emm_df_Saprotroph$forest_season <- factor(
+  emm_df_Saprotroph$forest_season, levels = c("RM - Wet", "RM - Dry",  
+               "NF - Wet" , "NF - Dry" , 
+               "AF - Wet", "AF - Dry" ,
+               "SF - Wet" , "SF - Dry" ))
+emm_df_Saprotroph$forest <- factor(emm_df_Saprotroph$forest, 
+                                   levels = c("RM", "NF", "AF", "SF"))
+
+Plot_Saprotroph <- ggplot() +
+  geom_jitter(data = Saprophytic_fungi, 
+              aes(x = forest, 
+                  y = richness, 
+                  group = forest_season), 
+              color = "grey60", 
+              alpha = 0.2, 
+              size = 1, 
+              position = position_dodge(0.5)) +
+  geom_point(data = emm_df_Saprotroph, 
+             aes(x = forest, 
+                 y = emmean, 
+                 color = forest_season), 
+             size = 2.5, 
+             shape = 16,
+             alpha = 0.5, 
+             position = position_dodge(width = 0.5)) + 
+  geom_errorbar(data = emm_df_Saprotroph, 
+                aes(x = forest, 
+                    ymin = lower.CL, 
+                    ymax = upper.CL, 
+                    color = forest_season),
+                width = 0.2, 
+                linewidth = 0.4,
+                alpha = 0.5, 
+                position = position_dodge(width = 0.5))+
+  ylab("Species richness") +
+  xlab("Forest type") +
+  theme(legend.position = "none",
+        axis.title = element_text(size = 10),
+        axis.text = element_text(size = 9),
+        axis.line = element_line(size = 0.05), 
+        panel.grid = element_blank(),
+        panel.background = element_rect(fill = "transparent", 
+                                        color = "black",size = 0.5)) +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.2))) +
+  scale_color_manual(
+    values = c("RM - Wet" = "cyan3", 
+               "RM - Dry" = "pink3",
+               "NF - Wet" = "cyan3", 
+               "NF - Dry" = "pink3", 
+               "AF - Wet" = "cyan3", 
+               "AF - Dry" = "pink3",
+               "SF - Wet" = "cyan3", 
+               "SF - Dry" = "pink3"))+
+  geom_point(data = data.frame(x = 3.8, y = 100), 
+             aes(x = x, y = y), 
+             shape = 16, 
+             size = 2, 
+             color = "cyan3", 
+             fill = "cyan3",
+             alpha=0.5) +
+  geom_text(data = data.frame(x = 4.1, y = 100, label = "Wet"),
+            aes(x = x, y = y, label = label), 
+            size = 2, color = "black") +
+
+  # Circle before the "Dry Season" text annotation
+  geom_point(data = data.frame(x = 3.8, y = 80), 
+             aes(x = x, y = y), 
+             shape = 16, 
+             size = 2, 
+             color = "pink3", 
+             fill = "pink3",
+             alpha=0.5) +
+  geom_text(data = data.frame(x = 4.1, y = 80, label = "Dry"),
+            aes(x = x, y = y, label = label), 
+            size = 2, color = "black")+
+  annotate("text", x = 0.5, y = 360, lineheight = 0.8, label = paste("Forest types: F = 18.6***", "\nSeason: F = 24.7", "\nForest types × Season: F = 2.1"), size = 2.5, hjust = 0)
+
+
+Plot_Saprotroph
+
+mod_Pathotroph <- lm(richness ~ forest * season, data = Pathogenic_fungi)
+summary(mod_Pathotroph)
+shapiro.test(residuals(mod_Pathotroph))
+car::Anova(mod_Pathotroph, method = "LR")
+emm_Pathotroph <- emmeans(mod_Pathotroph, ~ forest * season)
+summary(emm_Pathotroph, infer = c(TRUE, TRUE))  # includes CIs
+
+emm_df_Pathotroph <- as.data.frame(emm_Pathotroph)
+emm_df_Pathotroph$forest_season <- paste(
+  emm_df_Pathotroph$forest, 
+  emm_df_Pathotroph$season, sep = " - ")
+emm_df_Pathotroph$forest_season <- factor(
+  emm_df_Pathotroph$forest_season, levels = c("RM - Wet", "RM - Dry",  
+               "NF - Wet" , "NF - Dry" , 
+               "AF - Wet", "AF - Dry" ,
+               "SF - Wet" , "SF - Dry" ))
+emm_df_Pathotroph$forest <- factor(emm_df_Pathotroph$forest, 
+                                   levels = c("RM", "NF", "AF", "SF"))
+
+Plot_Pathotroph <- ggplot() +
+  geom_jitter(data = Pathogenic_fungi, 
+              aes(x = forest, 
+                  y = richness, 
+                  group = forest_season), 
+              color = "grey60", 
+              alpha = 0.2, 
+              size = 1, 
+              position = position_dodge(0.5)) +
+  geom_point(data = emm_df_Pathotroph, 
+             aes(x = forest, 
+                 y = emmean, 
+                 color = forest_season), 
+             size = 2.5, 
+             shape = 16,
+             alpha = 0.5, 
+             position = position_dodge(width = 0.5)) + 
+  geom_errorbar(data = emm_df_Pathotroph, 
+                aes(x = forest, 
+                    ymin = lower.CL, 
+                    ymax = upper.CL, 
+                    color = forest_season),
+                width = 0.2, 
+                linewidth = 0.4,
+                alpha = 0.5, 
+                position = position_dodge(width = 0.5))+
+  ylab("Species richness") +
+  xlab("Forest type") +
+  theme(legend.position = "none",
+        axis.title = element_text(size = 10),
+        axis.text = element_text(size = 9),
+        axis.line = element_line(size = 0.05), 
+        panel.grid = element_blank(),
+        panel.background = element_rect(fill = "transparent", 
+                                        color = "black",size = 0.5)) +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.2))) +
+  scale_color_manual(
+    values = c("RM - Wet" = "cyan3", 
+               "RM - Dry" = "pink3",
+               "NF - Wet" = "cyan3", 
+               "NF - Dry" = "pink3", 
+               "AF - Wet" = "cyan3", 
+               "AF - Dry" = "pink3",
+               "SF - Wet" = "cyan3", 
+               "SF - Dry" = "pink3"))+
+  geom_point(data = data.frame(x = 3.8, y = 14), 
+             aes(x = x, y = y), 
+             shape = 16, 
+             size = 2, 
+             color = "cyan3", 
+             fill = "cyan3",
+             alpha=0.5) +
+  geom_text(data = data.frame(x = 4.1, y = 14, label = "Wet"),
+            aes(x = x, y = y, label = label), 
+            size = 2, color = "black") +
+
+  # Circle before the "Dry Season" text annotation
+  geom_point(data = data.frame(x = 3.8, y = 10), 
+             aes(x = x, y = y), 
+             shape = 16, 
+             size = 2, 
+             color = "pink3", 
+             fill = "pink3",
+             alpha=0.5) +
+  geom_text(data = data.frame(x = 4.1, y = 10, label = "Dry"),
+            aes(x = x, y = y, label = label), 
+            size = 2, color = "black")+
+  annotate("text", x = 0.5, y = 60, lineheight = 0.8, label = paste("Forest types: F = 13.7***", "\nSeason: F = 7.0*", "\nForest types × Season: F = 2.5"), size = 2.5, hjust = 0)
+
+
+Plot_Pathotroph
+
+combine_richness_plot <- grid.arrange(
+  Plot_total_fungi, 
+  Plot_AM_fungi, 
+  Plot_Saprotroph, 
+  Plot_Pathotroph,
+  nrow = 2, 
+  ncol = 2, 
+padding = unit(1, "cm"))
+ggsave(
+  "/Users/sujanbalami/Documents/Postdoc/Research_paper/Molecular_data/R/Figures/Richness.tiff",
+  plot = combine_richness_plot,
+  dpi = 800,
+  height = 4.2,  width = 5  )
+
+```
+
+## Soil nutrients, pH and species richness
+
+```{r, warning=FALSE, message=FALSE}
+mod_total_fungi_soil <- lm(richness~ TC + TN + TP + pH, data = Total_fungi)
+summary(mod_total_fungi_soil)
+
+# Carbon
+mod_total_fungi_soil_C <- lm(richness~ TC, data = Total_fungi)
+summary(mod_total_fungi_soil_C)
+
+total_fungi_carbon <- ggplot(Total_fungi, aes(x = TC, y = richness, color = forest)) +
+  geom_point(alpha=0.5, size = 1) +
+  geom_smooth(method = "lm", se = TRUE, color = "black", fill = "grey90", size = 0.5) +
+  annotate("text", x = 16, y = 1680, label = paste("Adjusted R² = 0.28", "\ndf = 30,", "p-value = < 0.001"), 
+           size = 3, hjust = 0) +
+  labs(x = "Total carbon (g/kg)",
+       y = "Species richness",
+       title = NULL) +
+  theme(
+    legend.position = c(0.85, 0.25),
+    axis.title = element_text(size = 10),
+    axis.text = element_text(size = 8),
+    axis.line = element_line(size = 0.05),
+    panel.grid = element_blank(),
+    panel.background = element_rect(fill = "transparent", 
+                                    color = "black", size = 0.5),
+    plot.margin = margin(t = 10, r = 10, b = 10, l = 10),
+    legend.key = element_blank(),  
+    legend.background = element_blank(),
+    legend.spacing.y = unit(0.1, "lines"),
+    legend.spacing.x = unit(0.1, "lines"), 
+    legend.key.size = unit(0.2, "lines"),  
+    legend.text = element_text(size = 8),  
+    legend.title = element_text(size = 8) 
+    ) +
+  scale_color_manual(values = c("RM" = "#F8766D", "NF" = "#619CFF", "AF" = "cyan3", "SF" = "#00BA38"), name = NULL) +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.1)))
+
+
+total_fungi_carbon
+
+# Nitrogen
+mod_total_fungi_soil_N <- lm(richness~ TN, data = Total_fungi)
+summary(mod_total_fungi_soil_N)
+
+total_fungi_nitrogen <- ggplot(Total_fungi, aes(x = TN, y = richness, color = forest)) +
+  geom_point(alpha=0.5, size = 1) +
+  geom_smooth(method = "lm", se = TRUE, color = "black", fill = "grey90", size = 0.5) +
+  annotate("text", x = 1.7, y = 1650, label = paste("Adjusted R² = 0.35", "\ndf = 30,", "p-value = < 0.001"), 
+           size = 3, hjust = 0) +
+  labs(x = "Total nitrogen (g/kg)",
+       y = "Species richness",
+       title = NULL) +
+  theme(
+    legend.position = c(0.85, 0.25), 
+    axis.title = element_text(size = 10),
+    axis.text = element_text(size = 8),
+    axis.line = element_line(size = 0.05),
+    panel.grid = element_blank(),
+    panel.background = element_rect(fill = "transparent", 
+                                    color = "black", size = 0.5),
+    plot.margin = margin(t = 10, r = 10, b = 10, l = 10),
+    legend.key = element_blank(),  
+    legend.background = element_blank(),
+    legend.spacing.y = unit(0.1, "lines"),
+    legend.spacing.x = unit(0.1, "lines"), 
+    legend.key.size = unit(0.2, "lines"),  
+    legend.text = element_text(size = 8),  
+    legend.title = element_text(size = 8) 
+    ) +
+  scale_color_manual(values = c("RM" = "#F8766D", "NF" = "#619CFF", "AF" = "cyan3", "SF" = "#00BA38"), name = NULL) +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.1)))
+total_fungi_nitrogen
+
+# Phosphorus
+mod_total_fungi_soil_P <- lm(richness~ TP, data = Total_fungi)
+summary(mod_total_fungi_soil_P)
+total_fungi_phosphorus <- ggplot(Total_fungi, aes(x = TP, y = richness, color = forest)) +
+  geom_point(alpha=0.5, size = 1) +
+  geom_smooth(method = "lm", se = TRUE, color = "black", fill = "grey90", size = 0.5) +
+  annotate("text", x = 0.5, y = 190, label = paste("Adjusted R² = 0.33", "\ndf = 30,", "p-value = < 0.001"), 
+           size = 3, hjust = 0) +
+  labs(x = "Total phosphorus (g/kg)",
+       y = "Species richness",
+       title = NULL) +
+  theme(
+    legend.position = c(0.85, 0.7), 
+    axis.title = element_text(size = 10),
+    axis.text = element_text(size = 8),
+    axis.line = element_line(size = 0.05),
+    panel.grid = element_blank(),
+    panel.background = element_rect(fill = "white", 
+                                    color = "black", size = 0.5),
+    plot.margin = margin(t = 10, r = 10, b = 10, l = 10),
+    legend.key = element_blank(),  
+    legend.background = element_blank(),
+    legend.spacing.y = unit(0.1, "lines"),
+    legend.spacing.x = unit(0.1, "lines"), 
+    legend.key.size = unit(0.2, "lines"),  
+    legend.text = element_text(size = 8),  
+    legend.title = element_text(size = 8),
+    legend.title.margin = margin(b = 1)
+    ) +
+  scale_color_manual(values = c("RM" = "#F8766D", "NF" = "#619CFF", "AF" = "cyan3", "SF" = "#00BA38"), name = NULL)+
+  scale_y_continuous(
+    breaks = seq(0, 1600, by = 400))+
+  scale_x_continuous(
+    breaks = seq(0.5, 5, by = 1))+
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.1)))
+total_fungi_phosphorus
+
+# AM FUNGI
+# Carbon
+mod_AM_fungi_soil_C <- lm(richness~ TC, data = AM_fungi)
+summary(mod_AM_fungi_soil_C)
+
+AM_fungi_carbon <- ggplot(AM_fungi, aes(x = TC, y = richness, color = forest)) +
+  geom_point(alpha=0.5, size = 1) +
+  geom_smooth(method = "lm", se = TRUE, color = "black", fill = "grey90", size = 0.5) +
+  annotate("text", x = 16, y = 48, label = paste("Adjusted R² = 0.16", "\ndf = 30,", "p-value = < 0.05"), 
+           size = 3, hjust = 0) +
+  labs(x = "Total carbon (g/kg)",
+       y = "Species richness",
+       title = NULL) +
+  theme(
+    legend.position = c(0.85, 0.15),
+    axis.title = element_text(size = 10),
+    axis.text = element_text(size = 8),
+    axis.line = element_line(size = 0.05),
+    panel.grid = element_blank(),
+    panel.background = element_rect(fill = "transparent", 
+                                    color = "black", size = 0.5),
+    plot.margin = margin(t = 10, r = 10, b = 10, l = 10),
+    legend.key = element_blank(),  
+    legend.background = element_blank(),
+    legend.spacing.y = unit(0.1, "lines"),
+    legend.spacing.x = unit(0.1, "lines"), 
+    legend.key.size = unit(0.2, "lines"),  
+    legend.text = element_text(size = 8),  
+    legend.title = element_text(size = 8) 
+    ) +
+  scale_color_manual(values = c("RM" = "#F8766D", "NF" = "#619CFF", "AF" = "cyan3", "SF" = "#00BA38"), name = NULL) +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.1)),
+                     labels = scales::number_format(accuracy = 0.1))
+
+
+AM_fungi_carbon
+
+# Nitrogen
+mod_AM_fungi_soil_N <- lm(richness~ TN, data = AM_fungi)
+summary(mod_AM_fungi_soil_N)
+
+AM_fungi_nitrogen <- ggplot(AM_fungi, aes(x = TN, y = richness, color = forest)) +
+  geom_point(alpha=0.5, size = 1) +
+  geom_smooth(method = "lm", se = TRUE, color = "black", fill = "grey90", size = 0.5) +
+  annotate("text", x = 1.7, y = 45, label = paste("Adjusted R² = 0.20", "\ndf = 30,", "p-value = < 0.01"), 
+           size = 3, hjust = 0) +
+  labs(x = "Total nitrogen (g/kg)",
+       y = "Species richness",
+       title = NULL) +
+  theme(
+    legend.position = c(0.85, 0.15), 
+    axis.title = element_text(size = 10),
+    axis.text = element_text(size = 8),
+    axis.line = element_line(size = 0.05),
+    panel.grid = element_blank(),
+    panel.background = element_rect(fill = "transparent", 
+                                    color = "black", size = 0.5),
+    plot.margin = margin(t = 10, r = 10, b = 10, l = 10),
+    legend.key = element_blank(),  
+    legend.background = element_blank(),
+    legend.spacing.y = unit(0.1, "lines"),
+    legend.spacing.x = unit(0.1, "lines"), 
+    legend.key.size = unit(0.2, "lines"),  
+    legend.text = element_text(size = 8),  
+    legend.title = element_text(size = 8) 
+    ) +
+  scale_color_manual(values = c("RM" = "#F8766D", "NF" = "#619CFF", "AF" = "cyan3", "SF" = "#00BA38"), name = NULL) +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.1)),
+                     labels = scales::number_format(accuracy = 0.1))
+AM_fungi_nitrogen
+
+# pH
+mod_AM_fungi_soil_pH <- lm(richness~ pH, data = AM_fungi)
+summary(mod_AM_fungi_soil_pH)
+AM_fungi_pH <- ggplot(AM_fungi, aes(x = pH, y = richness, color = forest)) +
+  geom_point(alpha=0.5, size = 1) +
+  geom_smooth(method = "lm", se = TRUE, color = "black", fill = "grey90", size = 0.5) +
+  annotate("text", x = 4.2, y = 42, label = paste("Adjusted R² = 0.25", "\ndf = 30,", "p-value = < 0.01"), 
+           size = 3, hjust = 0) +
+  labs(x = "Soil pH",
+       y = "Species richness",
+       title = NULL) +
+  theme(
+    legend.position = c(0.85, 0.15), 
+    axis.title = element_text(size = 10),
+    axis.text = element_text(size = 8),
+    axis.line = element_line(size = 0.05),
+    panel.grid = element_blank(),
+    panel.background = element_rect(fill = "white", 
+                                    color = "black", size = 0.5),
+    plot.margin = margin(t = 10, r = 10, b = 10, l = 10),
+    legend.key = element_blank(),  
+    legend.background = element_blank(),
+    legend.spacing.y = unit(0.1, "lines"),
+    legend.spacing.x = unit(0.1, "lines"), 
+    legend.key.size = unit(0.2, "lines"),  
+    legend.text = element_text(size = 8),  
+    legend.title = element_text(size = 8),
+    legend.title.margin = margin(b = 1)
+    ) +
+  scale_color_manual(values = c("RM" = "#F8766D", "NF" = "#619CFF", "AF" = "cyan3", "SF" = "#00BA38"), name = NULL)+
+  scale_x_continuous(
+    breaks = seq(1, 8, by = 0.5))+
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.1)),
+                     labels = scales::number_format(accuracy = 0.1))
+AM_fungi_pH
+
+combine_fungi_soil <- grid.arrange(
+  total_fungi_carbon, 
+  total_fungi_nitrogen, 
+  total_fungi_phosphorus,                         
+  AM_fungi_carbon, 
+  AM_fungi_nitrogen, 
+  AM_fungi_pH, 
+  nrow = 2, 
+  ncol = 3)
+ggsave("/Users/sujanbalami/Documents/Postdoc/Research_paper/Molecular_data/R/Figures/richness_soil.tiff",
+  plot = combine_fungi_soil,
+  dpi = 800,
+  height = 5,
+  width = 7
+)
+```
+
+# Community composition
+
+```{r}
+library(compositions)
+library(vegan)
+library(ggplot2)
+library(scales)
+library(gridExtra)
+
+Forest_type <- rep(c("RM", "NF", "AF", "SF"), times=2, each = 4) 
+Season <- rep(rep(c("Dry", "Wet"), each = 16), times = 1)
+env_df <- data.frame(Forest_type = Forest_type, Season = Season)
+
+# Total fungi
+OTU_total_fungi <- read.csv("Total_fungi/dataset1/dataset1.csv", header = TRUE, row.names = 1)
+OTU_rel_abund <- sweep(OTU_total_fungi, 2, colSums(OTU_total_fungi), FUN = "/")
+OTU_rel_abund[OTU_rel_abund == 0] <- 1e-6
+OTU_total_fungi_t <- t(OTU_rel_abund)
+clr_OTU_total_fungi <- clr(OTU_total_fungi_t)
+clr_data_df <- as.matrix(clr_OTU_total_fungi)
+aitchison_dist <- dist(clr_data_df, method = "euclidean")
+aitchison_dist_df <- as.matrix(aitchison_dist)
+pca_result <- prcomp(aitchison_dist_df)
+summary(pca_result)
+permanova <- adonis2(aitchison_dist_df ~ Forest_type*Season, data = env_df, permutations = 999)
+permanova
+anosim <- anosim(aitchison_dist_df, grouping = Forest_Season, permutations = 999)
+anosim
+pca_df <- as.data.frame(pca_result$x)
+pca_df$Forest_type <- env_df$Forest_type
+pca_df$Season <- env_df$Season
+pca_df$Forest_type <- factor(pca_df$Forest_type, levels = c("RM", "NF", "AF", "SF"))
+composition_total_fungi <- ggplot(pca_df, aes(x = PC1, y = PC2, color = Forest_type, shape = Season)) +
+  geom_point(size = 2.5, alpha = 0.5) +
+  theme_bw(base_size = 10) +
+  labs(x = "PC1 (25.7%)", y = "PC2 (9.6%)",color= "Forest type", shape = "Season") +
+  scale_color_manual(values = c("RM" = "#F8766D", "NF" = "#619CFF", "AF" = "cyan3", "SF" = "#00BA38")) +
+  geom_vline(xintercept = 0, linetype = "longdash", color = "grey90") +
+  geom_hline(yintercept = 0, linetype = "longdash", color = "grey90") +
+  theme(legend.position = "none",
+        plot.title = element_text(size = 12, hjust = 0.5),
+        axis.title = element_text(size = 10),
+        axis.text = element_text(size = 10),
+        strip.text = element_text(size = 12, face = "bold"),
+        axis.line = element_line(size = 0.05),
+        panel.grid = element_blank(),
+        panel.background = element_rect(fill = "transparent", 
+                                        color = "black",size = 0.5),
+        plot.margin = margin(t = 10, r = 10, b = 10, l = 10))+
+  scale_y_continuous(expand = expansion(mult = c(0.1, 0.1)))+
+  annotate("text", x = 50, y = -100, lineheight = 0.8, label = paste("Forest types × Season", "\nAdonis test: R²=0.37***", "\nANOSIM statistics: R=0.48**"), size = 2.5, hjust = 0)
+composition_total_fungi
+
+# AM fungi
+OTU_AM_fungi <- read.csv("AM_fungi/dataset1/dataset1.csv", header = TRUE, row.names = 1)
+OTU_rel_abund_AM <- sweep(OTU_AM_fungi, 2, colSums(OTU_AM_fungi), FUN = "/")
+OTU_rel_abund_AM[OTU_rel_abund_AM == 0] <- 1e-6
+OTU_AM_fungi_t <- t(OTU_rel_abund_AM)
+clr_OTU_AM_fungi <- clr(OTU_AM_fungi_t)
+clr_data_df <- as.matrix(clr_OTU_AM_fungi)
+aitchison_dist <- dist(clr_data_df, method = "euclidean")
+aitchison_dist_df <- as.matrix(aitchison_dist)
+
+pca_result <- prcomp(aitchison_dist_df)
+summary(pca_result)
+
+permanova <- adonis2(aitchison_dist_df ~ Forest_type * Season, data = env_df, permutations = 999)
+permanova
+
+anosim <- anosim(aitchison_dist_df, grouping = Forest_Season, permutations = 999)
+anosim
+
+pca_df <- as.data.frame(pca_result$x)
+pca_df$Forest_type <- env_df$Forest_type
+pca_df$Season <- env_df$Season
+pca_df$Forest_type <- factor(pca_df$Forest_type, levels = c("RM", "NF", "AF", "SF"))
+
+composition_AM_fungi <- ggplot(pca_df, aes(x = PC1, y = PC2, color = Forest_type, shape = Season)) +
+  geom_point(size = 2.5, alpha = 0.5) +
+  theme_bw(base_size = 10) +
+  labs(x = "PC1 (45.1%)", y = "PC2 (9.7%)", color = "Forest type", shape = "Season") +
+  scale_color_manual(values = c("RM" = "#F8766D", "NF" = "#619CFF", "AF" = "cyan3", "SF" = "#00BA38")) +
+  geom_vline(xintercept = 0, linetype = "longdash", color = "grey90") +
+  geom_hline(yintercept = 0, linetype = "longdash", color = "grey90") +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(size = 12, hjust = 0.5),
+    axis.title = element_text(size = 10),
+    axis.text = element_text(size = 10),
+    strip.text = element_text(size = 12, face = "bold"),
+    axis.line = element_line(size = 0.05),
+    panel.grid = element_blank(),
+    panel.background = element_rect(fill = "transparent", color = "black", size = 0.5),
+    plot.margin = margin(t = 10, r = 10, b = 10, l = 10)
+  ) +
+  scale_y_continuous(expand = expansion(mult = c(0.1, 0.1))) +
+  annotate("text", x = -60, y = -60, lineheight = 0.8, 
+           label = paste("Forest types × Season", "\nAdonis test: R²=0.39***", "\nANOSIM statistics: R=0.39**"),
+           size = 2.5, hjust = 0)
+composition_AM_fungi
+
+# Saprophytic fungi
+OTU_saprophytic_fungi <- read.csv("Total_fungi/dataset1/FungalGuild/saprophytic_fungi.csv", header = TRUE, row.names = 1)
+OTU_rel_abund_saprotroph <- sweep(OTU_saprophytic_fungi, 2, colSums(OTU_saprophytic_fungi), FUN = "/")
+
+OTU_rel_abund_saprotroph[OTU_rel_abund_saprotroph == 0] <- 1e-6
+OTU_saprophytic_fungi_t <- t(OTU_rel_abund_saprotroph)
+clr_OTU_saprophytic_fungi <- clr(OTU_saprophytic_fungi_t)
+clr_data_df <- as.matrix(clr_OTU_saprophytic_fungi)
+aitchison_dist <- dist(clr_data_df, method = "euclidean")
+aitchison_dist_df <- as.matrix(aitchison_dist)
+
+pca_result <- prcomp(aitchison_dist_df)
+summary(pca_result)
+
+permanova <- adonis2(aitchison_dist_df ~ Forest_type * Season, data = env_df, permutations = 999)
+permanova
+
+anosim <- anosim(aitchison_dist_df, grouping = Forest_Season, permutations = 999)
+anosim
+
+pca_df <- as.data.frame(pca_result$x)
+pca_df$Forest_type <- env_df$Forest_type
+pca_df$Season <- env_df$Season
+pca_df$Forest_type <- factor(pca_df$Forest_type, levels = c("RM", "NF", "AF", "SF"))
+
+composition_saprophytic_fungi <- ggplot(pca_df, aes(x = PC1, y = PC2, color = Forest_type, shape = Season)) +
+  geom_point(size = 2.5, alpha = 0.5) +
+  theme_bw(base_size = 10) +
+  labs(x = "PC1 (30.3%)", y = "PC2 (9.4%)", color = "Forest type", shape = "Season") +
+  scale_color_manual(values = c("RM" = "#F8766D", "NF" = "#619CFF", "AF" = "cyan3", "SF" = "#00BA38")) +
+  geom_vline(xintercept = 0, linetype = "longdash", color = "grey90") +
+  geom_hline(yintercept = 0, linetype = "longdash", color = "grey90") +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(size = 12, hjust = 0.5),
+    axis.title = element_text(size = 10),
+    axis.text = element_text(size = 10),
+    strip.text = element_text(size = 12, face = "bold"),
+    axis.line = element_line(size = 0.05),
+    panel.grid = element_blank(),
+    panel.background = element_rect(fill = "transparent", color = "black", size = 0.5),
+    plot.margin = margin(t = 10, r = 10, b = 10, l = 10)
+  ) +
+  scale_y_continuous(expand = expansion(mult = c(0.1, 0.1))) +
+  annotate("text", x = 40, y = -95, lineheight = 0.8, 
+           label = paste("Forest types × Season", "\nAdonis test: R²=0.36***", "\nANOSIM statistics: R=0.40**"),
+           size = 2.5, hjust = 0)
+composition_saprophytic_fungi
+
+# Pathogenic fungi
+OTU_pathogenic_fungi <- read.csv("Total_fungi/dataset1/FungalGuild/pathogenic_fungi.csv", header = TRUE, row.names = 1)
+OTU_rel_abund_pathotroph <- sweep(OTU_pathogenic_fungi, 2, colSums(OTU_pathogenic_fungi), FUN = "/")
+OTU_rel_abund_pathotroph[OTU_rel_abund_pathotroph == 0] <- 1e-6
+OTU_pathogenic_fungi_t <- t(OTU_rel_abund_pathotroph)
+clr_OTU_pathogenic_fungi <- clr(OTU_pathogenic_fungi_t)
+clr_data_df <- as.matrix(clr_OTU_pathogenic_fungi)
+aitchison_dist <- dist(clr_data_df, method = "euclidean")
+aitchison_dist_df <- as.matrix(aitchison_dist)
+
+pca_result <- prcomp(aitchison_dist_df)
+summary(pca_result)
+
+permanova <- adonis2(aitchison_dist_df ~ Forest_type * Season, data = env_df, permutations = 999)
+permanova
+
+anosim <- anosim(aitchison_dist_df, grouping = Forest_Season, permutations = 999)
+anosim
+
+pca_df <- as.data.frame(pca_result$x)
+pca_df$Forest_type <- env_df$Forest_type
+pca_df$Season <- env_df$Season
+pca_df$Forest_type <- factor(pca_df$Forest_type, levels = c("RM", "NF", "AF", "SF"))
+
+composition_pathogenic_fungi <- ggplot(pca_df, aes(x = PC1, y = PC2, color = Forest_type, shape = Season)) +
+  geom_point(size = 2.5, alpha = 0.5) +
+  theme_bw(base_size = 10) +
+  labs(x = "PC1 (20.8%)", y = "PC2 (12.3%)", color = "Forest type", shape = "Season") +
+  scale_color_manual(values = c("RM" = "#F8766D", "NF" = "#619CFF", "AF" = "cyan3", "SF" = "#00BA38")) +
+  geom_vline(xintercept = 0, linetype = "longdash", color = "grey90") +
+  geom_hline(yintercept = 0, linetype = "longdash", color = "grey90") +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(size = 12, hjust = 0.5),
+    axis.title = element_text(size = 10),
+    axis.text = element_text(size = 10),
+    strip.text = element_text(size = 12, face = "bold"),
+    axis.line = element_line(size = 0.05),
+    panel.grid = element_blank(),
+    panel.background = element_rect(fill = "transparent", color = "black", size = 0.5),
+    plot.margin = margin(t = 10, r = 10, b = 10, l = 10)
+  ) +
+  scale_y_continuous(expand = expansion(mult = c(0.1, 0.1))) +
+  annotate("text", x = 10, y = -50, lineheight = 0.8, 
+           label = paste("Forest types × Season", "\nAdonis test: R²=0.35***", "\nANOSIM statistics: R=0.31**"),
+           size = 2.5, hjust = 0)
+composition_pathogenic_fungi
+
+
+combine_composition_plot <- grid.arrange(
+  composition_total_fungi, 
+  composition_AM_fungi, 
+  composition_saprophytic_fungi, 
+  composition_pathogenic_fungi,
+  nrow = 2, 
+  ncol = 2)
+
+ggsave(
+  "/Users/sujanbalami/Documents/Postdoc/Research_paper/Molecular_data/R/Figures/composition_2.tiff",
+  plot = combine_composition_plot,
+  dpi = 800,
+  height = 6,
+  width = 6.5
+)
+
+
+```
+
+# Relative abundance
+
+```{r}
+library(dplyr)
+# Functional group
+Relative_abundance_functional <- read.csv("Total_fungi/dataset1/FungalGuild/Trophic_mode_RA.csv", header = TRUE)
+Relative_abundance_functional$Season<-as.factor(Relative_abundance_functional$Season)
+Relative_abundance_functional$Forest<-as.factor(Relative_abundance_functional$Forest)
+Relative_abundance_functional$Trophic_mode<-as.factor(Relative_abundance_functional$Trophic_mode)
+Relative_abundance_functional$Trophic_mode<-factor(
+  Relative_abundance_functional$Trophic_mode, 
+  levels = c("Unidentified", 
+             "Saprotroph",
+             "Symbiotroph",
+             "Pathotroph",
+             "Pathotroph-Saprotroph",
+             "Saprotroph-Symbiotroph", 
+             "Pathotroph-Symbiotroph", 
+             "Pathotroph-Saprotroph-Symbiotroph"))
+Relative_abundance_functional$Forest<-factor(Relative_abundance_functional$Forest, 
+                                             levels=c("RM", "NF", "AF", "SF"))
+Relative_abundance_functional$Season<-factor(Relative_abundance_functional$Season, 
+                                             levels=c("Wet", "Dry"))
+
+manual_colors_functional <- c(
+  "Unidentified" = "grey50",                  # Neutral for unknowns
+  "Saprotroph" = "#d9f0a3",                   # pale green
+  "Symbiotroph" = "#a6d96a",                  # lime green
+  "Pathotroph" = "#66bd63",                   # soft medium green
+  "Pathotroph-Saprotroph" = "#1a9850",        # rich green
+  "Saprotroph-Symbiotroph" = "#006837",       # dark green
+  "Pathotroph-Symbiotroph" = "#004529",       # very dark forest green
+  "Pathotroph-Saprotroph-Symbiotroph" = "#002b18" # deepest green
+)
+
+
+
+Relative_abundance_functional_scaled <- Relative_abundance_functional %>%
+  group_by(Forest, Season) %>%
+  mutate(Relative_abundance_percent = Relative_abundance / sum(Relative_abundance) * 100)
+figure_functional_group <- ggplot(
+  data = Relative_abundance_functional_scaled,
+                         aes(x = Forest, 
+                         y = Relative_abundance_percent, 
+                         fill = Trophic_mode)) + 
+  geom_col(
+    position = position_stack(), 
+    colour = NA, 
+    alpha = 0.5, 
+    width = 0.8) + 
+  facet_wrap(~Season) +         
+  labs(x = "Forest type", 
+       y = "Relative abundance (%)", 
+       fill = "Functional group") +
+  theme_bw() +
+  theme(
+    axis.title = element_text(size = 14, color = "black"),                
+    axis.text = element_text(size = 12, color = "black"),                 
+    legend.text = element_text(size = 14),               
+    legend.title = element_text(size = 14),
+    legend.position = "right",
+    legend.key = element_blank(),
+    legend.key.size = unit(0.6, "cm"),  # Reduce legend box size
+    panel.background = element_blank(),
+    legend.box.margin = margin(0, 0, 0, -15),
+    panel.grid = element_blank(),
+    panel.border = element_blank(),
+    strip.text.x = element_text(size = 14, 
+                                face = "plain", 
+                                color = "black"),
+    strip.background = element_blank(), 
+    plot.margin = margin(10, 120, 10, 120, unit = "pt"),
+  ) +
+  scale_fill_manual(values = manual_colors_functional) +
+  guides(fill = guide_legend(nrow = 8, ncol = 1))
+figure_functional_group
+# AM Fungi
+Relative_abundance <- read.csv("AM_fungi/dataset1/AM_genus.csv", header = TRUE)
+Relative_abundance$Season<-as.factor(Relative_abundance$Season)
+Relative_abundance$Forest<-as.factor(Relative_abundance$Forest)
+Relative_abundance$Genus<-as.factor(Relative_abundance$Genus)
+Relative_abundance$Genus<-factor(Relative_abundance$Genus, 
+                                 levels = c("Glomus",
+                                            "Acaulospora",
+                                            "Claroideoglomus", 
+                                            "Archaeospora",
+                                            "Gigaspora", 
+                                            "Paraglomus", 
+                                            "Diversispora", 
+                                            "Redeckera"))
+Relative_abundance$Forest<-factor(Relative_abundance$Forest, levels=c("RM", "NF", "AF", "SF"))
+Relative_abundance$Season<-factor(Relative_abundance$Season, levels=c("Wet", "Dry"))
+manual_colors_family <- c(
+  "Glomus"        = "#08306b",  # deep navy blue
+  "Acaulospora"   = "#08519c",  # strong blue
+  "Claroideoglomus" = "#2171b5", # medium blue
+  "Archaeospora"  = "#4292c6",  # light steel blue
+  "Gigaspora"     = "#6baed6",  # sky blue
+  "Paraglomus"    = "#9ecae1",  # light sky blue
+  "Diversispora"  = "#6a51a3",  # strong purple
+  "Redeckera"     = "#9e9ac8"   # soft lavender purple
+)
+
+
+Relative_abundance_scaled <- Relative_abundance %>%
+  group_by(Forest, Season) %>%
+  mutate(Relative_abundance_percent = Abundance / sum(Abundance) * 100)
+AM_fungi_genus = ggplot(
+  data = Relative_abundance_scaled, 
+  aes(x = Forest,
+      y = Relative_abundance_percent, 
+      fill = Genus)) + 
+  geom_col(position = position_stack(), 
+           colour = NA, 
+           alpha = 0.5, 
+           width = 0.8) +  
+  facet_wrap(~Season) + 
+  labs( x = "Forest type", 
+    y = "Relative abundance (%)", 
+    fill = "Genus") +
+  theme_bw() +
+  theme(
+    axis.title = element_text(size = 14, color = "black"),                
+    axis.text = element_text(size = 12, color = "black"),                 
+    legend.text = element_text(size = 14, face = "italic"),               
+    legend.title = element_text(size = 14),
+    legend.position = "right",
+    legend.box.margin = margin(0, 0, 0, -15),
+    legend.key = element_blank(),
+    legend.key.size = unit(0.6, "cm"),  # Reduce legend box size
+    panel.background = element_blank(),
+    panel.grid = element_blank(),
+    panel.border = element_blank(),
+    strip.background = element_blank(),
+    strip.text.x = element_text(size = 14, 
+                                face = "plain", 
+                                color = "black")
+    
+  ) +
+  scale_fill_manual(values = manual_colors_family)
+
+# ECM fungi
+Relative_abundance_ECM <- read.csv("Total_fungi/dataset1/FungalGuild/ECM_genus.csv", header = TRUE)
+Relative_abundance_ECM$Season<-as.factor(Relative_abundance_ECM$Season)
+Relative_abundance_ECM$Forest<-as.factor(Relative_abundance_ECM$Forest)
+Relative_abundance_ECM$Genus<-as.factor(Relative_abundance_ECM$Genus)
+Relative_abundance_ECM$Genus<-factor(
+  Relative_abundance_ECM$Genus, levels = c("Others", 
+                                           "Inocybe",
+                                           "Inosperma",
+                                           "Russula",
+                                           "Elaphomyces",
+                                           "Thelephora", 
+                                           "Tomentella", 
+                                           "Scleroderma",
+                                           "Sebacina"))
+Relative_abundance_ECM$Forest<-factor(Relative_abundance_ECM$Forest,
+                                      levels=c("RM", "NF", "AF", "SF"))
+Relative_abundance_ECM$Season<-factor(Relative_abundance_ECM$Season, 
+                                      levels=c("Wet", "Dry"))
+manual_colors_ECM <- c(
+  "Inocybe"     = "#5c3317",  # very dark brown
+  "Inosperma"   = "#8b4513",  # saddle brown
+  "Scleroderma" = "#a0522d",  # sienna
+  "Russula"     = "#cd853f",  # peru
+  "Thelephora"  = "#deb887",  # burlywood
+  "Elaphomyces" = "#f4a460",  # sandy brown
+  "Tomentella"  = "#ffe4b5",  # moccasin (very pale)
+  "Sebacina"    = "#ff8c00",  # dark orange
+  "Others"      = "grey50"    # neutral gray
+)
+
+
+Relative_abundance_functional_scaled <- Relative_abundance_ECM %>%
+  group_by(Forest, Season) %>%
+  mutate(Relative_abundance_percent = Relative_abundance / sum(Relative_abundance) * 100)
+figure_ECM_Genus = ggplot(
+  data = Relative_abundance_functional_scaled, 
+                       aes(x = Forest, 
+                           y = Relative_abundance_percent, 
+                           fill = Genus)) + 
+  geom_col(position = position_stack(), 
+           colour = NA, 
+           alpha = 0.5,
+           width = 0.8) + 
+  facet_wrap(~Season) +  
+  labs( x = "Forest type", 
+    y = "Relative abundance (%)", fill = "Genus") +
+  theme_bw(base_size = 10) +
+  theme(
+    axis.title = element_text(size = 14, color = "black"),                
+    axis.text = element_text(size = 12, color = "black"),                 
+    legend.text = element_text(size = 14, face = "italic"),               
+    legend.title = element_text(size = 14),
+    legend.position = "right",
+    legend.box.margin = margin(0, 0, 0, -15),
+    legend.key = element_blank(),
+    legend.key.size = unit(0.6, "cm"),  # Reduce legend box size
+    panel.background = element_blank(),
+    panel.grid = element_blank(),
+    panel.border = element_blank(),
+    strip.text.x = element_text(size = 14, 
+                                face = "plain", 
+                                color = "black"),
+    strip.background = element_blank()
+      ) +
+  scale_fill_manual(values = manual_colors_ECM)
+
+# Combine top row (AM and ECM genus)
+combine_relative_abundance1 <- grid.arrange(AM_fungi_genus, figure_ECM_Genus, nrow = 1, ncol = 2)
+
+# Combine functional group figure with the top row
+combine_relative_abundance2 <- grid.arrange(figure_functional_group, combine_relative_abundance1, nrow = 2, ncol = 1)
+combine_relative_abundance3 <- grid.arrange(figure_functional_group, AM_fungi_genus, figure_ECM_Genus, nrow = 3, ncol = 1)
+# Save the final combined plot
+ggsave(
+  filename = "Figures/Relative_abundance.tiff",
+  plot = combine_relative_abundance2,
+  dpi = 800,
+  height = 7,
+  width = 10,
+  units = "in"
+)
+
+```
+
+## Relative abundance significance test
+
+```{r}
+pathogenic_fungi_RA <- Relative_abundance_functional[33:64,]
+saprophytic_fungi_RA <- Relative_abundance_functional[161:192,]
+symbiotic_fungi_RA <- Relative_abundance_functional[225:256,]
+
+shapiro.test(pathogenic_fungi_RA$Relative_abundance)
+shapiro.test(saprophytic_fungi_RA$Relative_abundance)
+shapiro.test(symbiotic_fungi_RA$Relative_abundance)
+
+hist(pathogenic_fungi_RA$Relative_abundance)
+hist(saprophytic_fungi_RA$Relative_abundance)
+hist(symbiotic_fungi_RA$Relative_abundance)
+
+
+# Pathogenic fungi
+model_pathogenic_fungi_RA <- glm(Relative_abundance ~ Forest * Season, 
+             data = pathogenic_fungi_RA, 
+             family = Gamma(link = "log"))
+summary(model_pathogenic_fungi_RA)
+shapiro.test(residuals(model_pathogenic_fungi_RA))
+car::Anova(model_pathogenic_fungi_RA, method = "LR")
+
+
+#Saprophytic fungi
+model_saprophytic_fungi_RA <- lm(Relative_abundance ~ Forest * Season, 
+             data = saprophytic_fungi_RA)
+summary(model_saprophytic_fungi_RA)
+shapiro.test(residuals(model_saprophytic_fungi_RA))
+car::Anova(model_saprophytic_fungi_RA, method = "LR")
+
+# Symbiotic fungi
+model_symbiotic_fungi_RA <- glm(Relative_abundance ~ Forest * Season, 
+             data = symbiotic_fungi_RA, 
+             family = Gamma(link = "log"))
+summary(model_symbiotic_fungi_RA)
+shapiro.test(residuals(model_symbiotic_fungi_RA))
+car::Anova(model_symbiotic_fungi_RA, method = "LR")
+
+```
+
+
+# Distance based RDA
+
+```{r}
+# Running RDA with the environmental data
+library(vegan)
+library(ggord)
+# Total fungi
+total_fungi <- read.csv("Total_fungi/dataset1/dataset1.csv", row.names = 1, header = TRUE)
+env_total_fungi <- read.csv("env.csv", row.names = 1, header = TRUE)
+location_total_fungi <- read.csv("location.csv", header = TRUE, row.names = 1)
+
+total_fungi[total_fungi == 0] <- 1e-6
+total_fungi_t <- t(total_fungi)
+clr_total_fungi <- clr(total_fungi_t)
+clr_data_df <- as.matrix(clr_total_fungi)
+aitchison_dist <- dist(clr_data_df, method = "euclidean")
+aitchison_dist_df <- as.matrix(aitchison_dist)
+
+# Perform Principal Coordinates of Neighbor Matrices (PCNM) on the location data
+location.pcnm_total_fungi <- as.data.frame(scores(pcnm(dist(location_total_fungi))))
+
+# Perform dbRDA using capscale
+dbrda_result_total_fungi <- capscale(aitchison_dist_df ~ TC + TN + TP + pH + 
+                                       Condition(as.matrix(location.pcnm_total_fungi)[, 1:2]), data = env_total_fungi)
+
+# Summary of the RDA result
+summary(dbrda_result_total_fungi)
+
+# Combine the first two PCNM scores to use in further analysis
+combined_pcnm_total_fungi <- cbind(location.pcnm_total_fungi$PCNM1, location.pcnm_total_fungi$PCNM2)
+
+# Assign forest type and season to site_scores
+Forest_type <- rep(c("RM", "NF", "AF", "SF"), times = 2, each = 4) 
+Season <- rep(rep(c("Dry", "Wet"), each = 16), times = 1)
+
+# Ensure site_scores exists and is a dataframe, then add columns
+site_scores <- data.frame(Forest_type = Forest_type, Season = Season)
+
+# Define forest colors and apply transparency
+forest_colors <- c("RM" = "#F8766D", "NF" = "#619CFF", "AF" = "cyan3", "SF" = "#00BA38")
+forest_colors_transparent <- sapply(forest_colors, function(color) rgb(t(col2rgb(color)), alpha = 128, maxColorValue = 255))
+
+# Map transparent colors to the levels of Forest_type in site_scores
+site_colors <- forest_colors_transparent[site_scores$Forest_type]
+
+# Define shapes for seasons (17 = triangle for Dry, 19 = circle for Wet)
+season_shapes <- ifelse(site_scores$Season == "Dry", 17, 19)
+# Set up a 1x2 plotting layout
+par(mfrow = c(1, 2))
+# Plot the dbRDA result (scaling = 2 for better visualization)
+plot(dbrda_result_total_fungi, 
+     scaling = 2,   # Scaling factor for visualization
+     xlab = "db-RDA1 (51.1%)", ylab = "db-RDA2 (19.4%)", # Customize axis labels
+     type = "n")    # "n" to suppress default points
+
+# Add points with transparency and different shapes for seasons
+points(dbrda_result_total_fungi, display = "sites", 
+       pch = season_shapes,  # Season shapes (17 for dry, 19 for wet)
+       col = site_colors,     # Transparent colors based on forest type
+       cex = 1)  # Point size
+
+# Fit the environmental variables (TC, TN, TP, and pH)
+envfit_result <- envfit(dbrda_result_total_fungi, env_total_fungi[, c("TC", "TN", "TP", "pH")], perm = 999)
+envfit_result$vectors
+# Plot the environmental vectors without axes and labels
+plot(envfit_result, p.max = 1, col = "grey30")  # Environmental vectors in grey30
+
+# Perform PERMANOVA to test the effects of environmental and location variables
+permanova_result_total_fungi <- adonis2(aitchison_dist_df ~ TC + TN + TP + pH 
+                                        + combined_pcnm_total_fungi,
+                                        data = env_total_fungi, permutations = 999)
+
+# Print the PERMANOVA result
+print(permanova_result_total_fungi)
+
+# Adjusted R^2 for dbRDA result
+RsquareAdj(dbrda_result_total_fungi)
+# Run PERMANOVA for individual environmental factors
+permanova_TC <- adonis2(aitchison_dist_df ~ TC + combined_pcnm_total_fungi, data = env_total_fungi, permutations = 999)
+permanova_TN <- adonis2(aitchison_dist_df ~ TN + combined_pcnm_total_fungi, data = env_total_fungi, permutations = 999)
+permanova_TP <- adonis2(aitchison_dist_df ~ TP + combined_pcnm_total_fungi, data = env_total_fungi, permutations = 999)
+permanova_pH <- adonis2(aitchison_dist_df ~ pH + combined_pcnm_total_fungi, data = env_total_fungi, permutations = 999)
+
+# Print the results
+print(permanova_TC)
+print(permanova_TN)
+print(permanova_TP)
+print(permanova_pH)
+
+
+
+
+# AM fungi
+# Total fungi
+AM_fungi <- read.csv("Total_fungi/dataset1/dataset1.csv", row.names = 1, header = TRUE)
+env_AM_fungi <- read.csv("env.csv", row.names = 1, header = TRUE)
+location_AM_fungi <- read.csv("location.csv", header = TRUE, row.names = 1)
+
+AM_fungi[AM_fungi == 0] <- 1e-6
+AM_fungi_t <- t(AM_fungi)
+clr_AM_fungi <- clr(AM_fungi_t)
+clr_data_df_AM <- as.matrix(clr_AM_fungi)
+aitchison_dist_AM <- dist(clr_data_df_AM, method = "euclidean")
+aitchison_dist_df_AM <- as.matrix(aitchison_dist_AM)
+
+# Perform Principal Coordinates of Neighbor Matrices (PCNM) on the location data
+location.pcnm_AM_fungi <- as.data.frame(scores(pcnm(dist(location_AM_fungi))))
+
+# Perform dbRDA using capscale
+dbrda_result_AM_fungi <- capscale(aitchison_dist_df_AM ~ TC + TN + TP + pH + 
+                                    Condition(as.matrix(location.pcnm_AM_fungi)[, 1:2]), data = env_AM_fungi)
+
+# Summary of the RDA result
+summary(dbrda_result_AM_fungi)
+
+# Combine the first two PCNM scores to use in further analysis
+combined_pcnm_AM_fungi <- cbind(location.pcnm_AM_fungi$PCNM1, location.pcnm_AM_fungi$PCNM2)
+
+# Perform PERMANOVA to test the effects of environmental and location variables
+permanova_result_AM_fungi <- adonis2(aitchison_dist_df_AM ~ TC + TN + TP + pH + combined_pcnm_AM_fungi,
+                                     data = env_AM_fungi, permutations = 999)
+
+# Print the PERMANOVA result
+print(permanova_result_AM_fungi)
+
+# Adjusted R^2 for dbRDA result
+RsquareAdj(dbrda_result_AM_fungi)
+
+# Assign forest type and season to site_scores
+Forest_type <- rep(c("RM", "NF", "AF", "SF"), times = 2, each = 4) 
+Season <- rep(rep(c("Dry", "Wet"), each = 16), times = 1)
+
+# Ensure site_scores exists and is a dataframe, then add columns
+site_scores <- data.frame(Forest_type = Forest_type, Season = Season)
+
+# Define forest colors and apply transparency
+forest_colors <- c("RM" = "#F8766D", "NF" = "#619CFF", "AF" = "cyan3", "SF" = "#00BA38")
+forest_colors_transparent <- sapply(forest_colors, function(color) rgb(t(col2rgb(color)), alpha = 128, maxColorValue = 255))
+
+# Map transparent colors to the levels of Forest_type in site_scores
+site_colors <- forest_colors_transparent[site_scores$Forest_type]
+
+# Define shapes for seasons (17 = triangle for Dry, 19 = circle for Wet)
+season_shapes <- ifelse(site_scores$Season == "Dry", 17, 19)
+
+
+
+
+
+
+png("Figures/dbRDA.tiff",
+    , width = 7, height = 4, units = "in", res = 600)
+
+par(mfrow = c(1, 2), mar = c(6, 4, 3, 3), cex.axis = 0.8, cex.lab = 1, mgp = c(1.5, 0.5, 0))
+# Plot the dbRDA result (scaling = 2 for better visualization)
+plot(dbrda_result_total_fungi, 
+     scaling = 2,   # Scaling factor for visualization
+     xlab = "db-RDA1 (51.1%)", ylab = "db-RDA2 (19.4%)", # Customize axis labels
+     type = "n")    # "n" to suppress default points
+
+# Add points with transparency and different shapes for seasons
+points(dbrda_result_total_fungi, display = "sites", 
+       pch = season_shapes,  # Season shapes (17 for dry, 19 for wet)
+       col = site_colors,     # Transparent colors based on forest type
+       cex = 1)  # Point size
+
+# Fit the environmental variables (TC, TN, TP, and pH)
+envfit_result <- envfit(dbrda_result_total_fungi, env_total_fungi[, c("TC", "TN", "TP", "pH")], perm = 999)
+
+# Plot the environmental vectors without axes and labels
+plot(envfit_result, p.max = 1, col = "grey50", cex = 0.8)  # Environmental vectors in grey30
+# Add legend for site_colors (forest type)
+
+
+# Plot the dbRDA result (scaling = 2 for better visualization)
+plot(dbrda_result_AM_fungi, 
+     scaling = 2,   # Scaling factor for visualization
+     xlab = "db-RDA1 (57.2%)", ylab = "db-RDA2 (20.0%)", # Customize axis labels
+     type = "n")    # "n" to suppress default points
+
+# Add points with transparency and different shapes for seasons
+points(dbrda_result_AM_fungi, display = "sites", 
+       pch = season_shapes,  # Season shapes (17 for dry, 19 for wet)
+       col = site_colors,     # Transparent colors based on forest type
+       cex = 1)  # Point size
+
+# Fit the environmental variables (TC, TN, TP, and pH)
+envfit_result <- envfit(dbrda_result_AM_fungi, env_AM_fungi[, c("TC", "TN", "TP", "pH")], perm = 999)
+
+# Plot the environmental vectors without axes and labels
+plot(envfit_result, p.max = 1, col = "grey50", cex = 0.8)  # Remove labels from the plot
+dev.off()
+
+```
+
+# Community assembly
+
+```{r}
+neutral.fit.original <- function(otu){
+  
+  # Frequency
+  otu.pa <- (otu>0)*1
+  freq <- apply(otu.pa, 2, mean)
+  
+  # Individuals per community
+  N <- mean(apply(otu, 1, sum))
+  
+  # Relative abundance
+  p <- apply(otu, 2, function(x) mean(x))/N
+  
+  # Detection limit
+  d = 1/N
+  
+  # Define likelihood function
+  neutral.ll <- function(m, sigma){
+    R = freq - pbeta(d, N*m*p, N*m*(1-p), lower.tail=FALSE)
+    -sum(dnorm(R, 0, sigma,log=TRUE))
+  }
+  
+  # Fit neutral model
+  m.mle <- mle2(neutral.ll, start=list(m=0.01, sigma=0.1),method="Nelder-Mead")
+  
+  # R-squared
+  gRsqr <- 1 - exp(-as.numeric(logLik(m.mle))/length(p))
+  
+  # Predictions
+  freq.pred <- pbeta(d, N*m.mle@coef['m']*p, N*m.mle@coef['m']*(1-p), lower.tail=FALSE)
+  pred.ci <- binconf(freq.pred*nrow(otu), nrow(otu), return.df=TRUE)
+  
+  # Bind results
+  stats <- cbind(m.mle@coef['m'], m.mle@details$value,gRsqr , N, nrow(otu), length(p), d)
+  pred <- cbind(p, freq, freq.pred, pred.ci[,2:3])
+  
+  results <- list(stats,pred)
+  return(results)
+}
+```
+
+```{r}
+# AF
+AF <- read.csv("Total_fungi/dataset2/AF.csv", row.names = 1, header = TRUE)
+AF_t <- t(AF)
+results <- neutral.fit.original(AF_t)
+predictions <- results[[2]]
+predictions$logp <- log(predictions$p + 1e-10)  
+predictions$point_color <- ifelse(predictions$freq < predictions$Lower, "Below CI", ifelse(predictions$freq > predictions$Upper, "Above CI", "Within CI"))
+results_df <- as.data.frame(results[[1]])
+Nm_value <- results[[1]][1, 1]
+gRsqr_value <- results[[1]][1, 3]
+Nm_value
+gRsqr_value
+AF_community_assembly_total_fungi <- ggplot(predictions, aes(x = logp, y = freq)) +
+  geom_point(aes(color = point_color), alpha = 0.3) + 
+  geom_ribbon(aes(ymin = Lower, ymax = Upper), fill = NA, color = "steelblue", linetype = "dashed") + 
+  geom_line(aes(x = logp, y = freq.pred), color = "steelblue", size = 0.5) +  # Add prediction line
+  labs(x = "log10 (Mean relative abundance)", y = "Observed frequency") +
+  scale_color_manual(values = c("Below CI" = "cyan3", "Above CI" = "pink3", "Within CI" = "grey40")) +
+  theme_classic(base_size = 10) +
+  theme(panel.background = element_rect(fill = "transparent", 
+                                        color = "black",size = 0.5),
+    panel.border = element_rect(color = "black", fill = NA, size = 0.4),
+    plot.title = element_text(size = 10, hjust = 0.5),
+    axis.text = element_text(size = 10), 
+    axis.title = element_text(size = 10), 
+    legend.position = "none",
+    axis.line = element_line(size = 0.4, color = "black")
+    )+
+  annotate("text", x = max(predictions$logp) -8, y = max(predictions$freq), 
+           label = paste("R² = ", round(gRsqr_value, 3), "\nNm = ", round(Nm_value, 4)), 
+           hjust = 1, vjust = 1, size = 2, color = "black", fontface = "italic")+
+  scale_y_continuous(expand = expansion(mult = c(0.01, 0.15)))
+AF_community_assembly_total_fungi
+
+# NF
+NF <- read.csv("Total_fungi/dataset2/NF.csv", row.names = 1, header = TRUE)
+NF_t <- t(NF)
+results <- neutral.fit.original(NF_t)
+predictions <- results[[2]]
+predictions$logp <- log(predictions$p + 1e-10)  
+predictions$point_color <- ifelse(predictions$freq < predictions$Lower, "Below CI", ifelse(predictions$freq > predictions$Upper, "Above CI", "Within CI"))
+results_df <- as.data.frame(results[[1]])
+Nm_value <- results[[1]][1, 1]
+gRsqr_value <- results[[1]][1, 3]
+Nm_value
+gRsqr_value
+NF_community_assembly_total_fungi <- ggplot(predictions, aes(x = logp, y = freq)) +
+  geom_point(aes(color = point_color), alpha = 0.3) + 
+  geom_ribbon(aes(ymin = Lower, ymax = Upper), fill = NA, color = "steelblue", linetype = "dashed") + 
+  geom_line(aes(x = logp, y = freq.pred), color = "steelblue", size = 0.5) +  # Add prediction line
+  labs(x = "log10 (Mean relative abundance)", y = "Observed frequency") +
+  scale_color_manual(values = c("Below CI" = "cyan3", "Above CI" = "pink3", "Within CI" = "grey40")) +
+  theme_classic(base_size = 10) +
+  theme(panel.background = element_rect(fill = "transparent", 
+                                        color = "black",size = 0.5),
+    panel.border = element_rect(color = "black", fill = NA, size = 0.4),
+    plot.title = element_text(size = 10, hjust = 0.5),
+    axis.text = element_text(size = 10), 
+    axis.title = element_text(size = 10), 
+    legend.position = "none",
+    axis.line = element_line(size = 0.4, color = "black")
+    )+
+  annotate("text", x = max(predictions$logp) -8, y = max(predictions$freq), 
+           label = paste("R² = ", round(gRsqr_value, 3), "\nNm = ", round(Nm_value, 4)), 
+           hjust = 1, vjust = 1, size = 2, color = "black", fontface = "italic")+
+  scale_y_continuous(expand = expansion(mult = c(0.01, 0.15)))
+
+
+```
+
+```{r}
+library(Hmisc)
+library(bbmle)
+# AF
+
+AF <- read.csv("Total_fungi/dataset2/AF.csv", row.names = 1, header = TRUE)
+AF_t <- t(AF)
+results <- neutral.fit.original(AF_t)
+predictions <- results[[2]]
+predictions$logp <- log(predictions$p + 1e-10)  
+predictions$point_color <- ifelse(predictions$freq < predictions$Lower, "Below CI", ifelse(predictions$freq > predictions$Upper, "Above CI", "Within CI"))
+results_df <- as.data.frame(results[[1]])
+Nm_value <- results[[1]][1, 1]
+gRsqr_value <- results[[1]][1, 3]
+Nm_value
+gRsqr_value
+AF_community_assembly_total_fungi <- ggplot(predictions, aes(x = logp, y = freq)) +
+  geom_point(aes(color = point_color), alpha = 0.3) + 
+  geom_ribbon(aes(ymin = Lower, ymax = Upper), fill = NA, color = "steelblue", linetype = "dashed") + 
+  geom_line(aes(x = logp, y = freq.pred), color = "steelblue", size = 0.5) +  # Add prediction line
+  labs(x = "log10 (Mean relative abundance)", y = "Observed frequency") +
+  scale_color_manual(values = c("Below CI" = "cyan3", "Above CI" = "pink3", "Within CI" = "grey40")) +
+  theme_classic(base_size = 10) +
+  theme(
+    panel.border = element_rect(color = "black", fill = NA, size = 0.4),
+    plot.title = element_text(size = 10, hjust = 0.5),
+    axis.text = element_text(size = 10), 
+    axis.title = element_text(size = 10), 
+    legend.position = "none",
+    axis.line = element_line(size = 0.4, color = "black")
+    )+
+  annotate("text", x = max(predictions$logp) -8, y = max(predictions$freq), 
+           label = paste("R² = ", round(gRsqr_value, 3), "\nNm = ", round(Nm_value, 4)), 
+           hjust = 1, vjust = 1, size = 2, color = "black", fontface = "italic")+
+  scale_y_continuous(expand = expansion(mult = c(0.1, 0.15)))
+AF_community_assembly_total_fungi
+
+
+
+# NF
+NF <- read.csv("Total_fungi/dataset2/NF.csv", row.names = 1, header = TRUE)
+NF_t <- t(NF)
+results <- neutral.fit.original(NF_t)
+predictions <- results[[2]]
+predictions$logp <- log(predictions$p + 1e-10)  
+predictions$point_color <- ifelse(predictions$freq < predictions$Lower, "Below CI", ifelse(predictions$freq > predictions$Upper, "Above CI", "Within CI"))
+results_df <- as.data.frame(results[[1]])
+Nm_value <- results[[1]][1, 1]
+gRsqr_value <- results[[1]][1, 3]
+Nm_value
+gRsqr_value
+NF_community_assembly_total_fungi <- ggplot(predictions, aes(x = logp, y = freq)) +
+  geom_point(aes(color = point_color), alpha = 0.3) + 
+  geom_ribbon(aes(ymin = Lower, ymax = Upper), fill = NA, color = "steelblue", linetype = "dashed") + 
+  geom_line(aes(x = logp, y = freq.pred), color = "steelblue", size = 0.5) +  # Add prediction line
+  labs(x = "log10 (Mean relative abundance)", y = "Observed frequency") +
+  scale_color_manual(values = c("Below CI" = "cyan3", "Above CI" = "pink3", "Within CI" = "grey40")) +
+  theme_classic(base_size = 10) +
+  theme(
+    panel.border = element_rect(color = "black", fill = NA, size = 0.4),
+    plot.title = element_text(size = 10, hjust = 0.5),
+    axis.text = element_text(size = 10), 
+    axis.title = element_text(size = 10), 
+    legend.position = "none",
+    axis.line = element_line(size = 0.4, color = "black")
+    )+
+  annotate("text", x = max(predictions$logp) -8, y = max(predictions$freq), 
+           label = paste("R² = ", round(gRsqr_value, 3), "\nNm = ", round(Nm_value, 4)), 
+           hjust = 1, vjust = 1, size = 2, color = "black", fontface = "italic")+
+  scale_y_continuous(expand = expansion(mult = c(0.1, 0.15)))
+NF_community_assembly_total_fungi
+```
+
+# BNTI
+
+```{r}
+# AF
+library(DECIPHER)
+library(ape)
+library(phangorn)
+
+fas <- "Total_fungi/dataset2/Tree/AF_mostabun.fas"
+seqs_aligned <- readDNAStringSet(fas)
+aligned <- AlignSeqs(seqs_aligned)
+writeXStringSet(aligned, file="Total_fungi/dataset2/Tree/AF_aligned.fasta")
+fasta_file <- read.dna("Total_fungi/dataset2/Tree/AF_aligned.fasta", format = "fasta")
+phyDat_seqs <- as.phyDat(fasta_file)
+dm <- dist.ml(phyDat_seqs)
+treeNJ <- NJ(dm)
+fit_mt <- pml(treeNJ, data = phyDat_seqs) 
+fit_mt_opt <- optim.pml(fit_mt, model = "GTR", optInv = TRUE, optGamma = TRUE, optNni = TRUE) 
+saveRDS(fit_mt_opt, "Total_fungi/dataset2/Tree/AF_fit_mt_opt.rds")
+ml_tree <- fit_mt_opt$tree
+treeRooted <- midpoint(ml_tree)
+plot.phylo(ml_tree, type = "fan", show.node.label = FALSE, show.tip.label = FALSE)
+write.tree(treeRooted, file = "Total_fungi/dataset2/Tree/AF_ML_tree_rooted.nwk")
+
+# NF
+fas_NF <- "Total_fungi/dataset2/Tree/NF_mostabun.fas"
+seqs_aligned_NF <- readDNAStringSet(fas_NF)
+aligned_NF <- AlignSeqs(seqs_aligned_NF)
+writeXStringSet(aligned_NF, file="Total_fungi/dataset2/Tree/NF_aligned.fasta")
+fasta_file_NF <- read.dna("Total_fungi/dataset2/Tree/NF_aligned.fasta", format = "fasta")
+phyDat_seqs_NF <- as.phyDat(fasta_file_NF)
+dm_NF <- dist.ml(phyDat_seqs_NF)
+treeNJ_NF <- NJ(dm_NF)
+fit_mt_NF <- pml(treeNJ_NF, data = phyDat_seqs_NF) 
+fit_mt_opt_NF <- optim.pml(fit_mt_NF, model = "GTR", 
+                           optInv = TRUE, optGamma = TRUE, 
+                           optNni = TRUE) 
+saveRDS(fit_mt_opt_NF, "Total_fungi/dataset2/Tree/NF_fit_mt_opt.rds")
+ml_tree_NF <- fit_mt_opt_NF$tree
+print(ml_tree_NF)
+treeRooted_NF <- midpoint(ml_tree_NF)
+plot.phylo(ml_tree_NF, type = "fan", 
+           show.node.label = FALSE, 
+           show.tip.label = FALSE)
+write.tree(treeRooted_NF, file = "Total_fungi/dataset2/Tree/NF_ML_tree_rooted.nwk")
+
+```
+
+```{r}
+# Load the tree (assuming you have the 'ape' package installed for reading Newick files)
+library(ape)
+#AF
+# Read the Newick file
+tree <- read.tree("Total_fungi/dataset2/Tree/AF_ML_tree_rooted.nwk")
+
+# Modify the labels to remove everything after the '|'
+tree$tip.label <- sub("\\|.*", "", tree$tip.label)
+
+# Save the modified tree to a new file
+write.tree(tree, file = "Total_fungi/dataset2/Tree/AF_ML_tree_rooted_modified.nwk")
+
+# Check the modified labels
+tree$tip.label
+
+#NF
+
+# Read the Newick file
+tree_NF <- read.tree("Total_fungi/dataset2/Tree/NF_ML_tree_rooted.nwk")
+
+# Modify the labels to remove everything after the '|'
+tree_NF$tip.label <- sub("\\|.*", "", tree_NF$tip.label)
+
+# Save the modified tree to a new file
+write.tree(tree_NF, file = "Total_fungi/dataset2/Tree/NF_ML_tree_rooted_modified.nwk")
+
+# Check the modified labels
+tree_NF$tip.label
+```
+
+```{r}
+library(picante)
+#AF
+AF <- read.csv("Total_fungi/dataset2/AF.csv", header = TRUE, row.names = 1)
+AF_t <- t(AF)
+AF_tree <- read.tree("Total_fungi/dataset2/Tree/AF_ML_tree_rooted_modified.nwk")
+phylo_distances_AF <- cophenetic.phylo(AF_tree)
+#AF
+observed_beta_AF <- picante::comdistnt(AF_t, 
+                                       phylo_distances_AF, 
+                                       abundance.weighted = TRUE)
+observed_beta_matrix_AF <- as.matrix(observed_beta_AF) #convert to matrix
+
+null_model_runs <- 999
+test_null_AF <- randomizeMatrix(AF_t, null.model = "independentswap")
+test_beta_AF <- comdistnt(test_null_AF, phylo_distances_AF, abundance.weighted = TRUE) 
+null_beta_list_AF <- replicate(null_model_runs, 
+                               comdistnt(
+                                 randomizeMatrix(AF_t, 
+                                                 null.model = "independentswap"), 
+                                 phylo_distances_AF, 
+                                 abundance.weighted = TRUE), 
+                               simplify = FALSE)
+null_beta_AF <- array(unlist(null_beta_list_AF), 
+                      dim = c(nrow(AF_t), 
+                              nrow(AF_t), 
+                              null_model_runs))
+null_beta_mean_AF <- apply(null_beta_AF, c(1, 2), mean) 
+null_beta_sd_AF <- apply(null_beta_AF, c(1, 2), sd) 
+beta_nti_AF <- (observed_beta_matrix_AF - null_beta_mean_AF) / null_beta_sd_AF
+beta_nti_symmetric_AF <- (beta_nti_AF + t(beta_nti_AF)) / 2
+diag(beta_nti_symmetric_AF) <- 0  
+all(beta_nti_symmetric_AF == t(beta_nti_symmetric_AF)) 
+beta_nti_symmetric_AF
+
+# Extract lower triangle of the symmetric βNTI matrix
+lower_triangle_indices_AF <- lower.tri(beta_nti_symmetric_AF)
+beta_nti_lower_AF <- beta_nti_symmetric_AF[lower_triangle_indices_AF]
+
+# Create data frame and filter for significant βNTI values
+beta_nti_lower_long_AF <- data.frame(βNTI = beta_nti_lower_AF)
+beta_nti_lower_long_AF$Forest_types <- "AF"
+
+# Classify each pairwise βNTI as deterministic or stochastic
+beta_nti_lower_long_AF$Process <- ifelse(
+  abs(beta_nti_lower_long_AF$βNTI) > 2, "Deterministic", "Stochastic")
+
+# Calculate proportions
+process_proportions_AF <- prop.table(table(beta_nti_lower_long_AF$Process))
+
+# View proportions
+print(process_proportions_AF)
+library(writexl)
+write_xlsx(beta_nti_lower_long_AF, "Total_fungi/dataset2/assembly/bNTI_AF.xlsx")
+
+
+# NF
+NF <- read.csv("Total_fungi/dataset2/NF.csv", header = TRUE, row.names = 1)
+NF_t <- t(NF)
+NF_tree <- read.tree("Total_fungi/dataset2/Tree/NF_ML_tree_rooted_modified.nwk")
+phylo_distances_NF <- cophenetic.phylo(NF_tree)
+
+# NF
+observed_beta_NF <- picante::comdistnt(NF_t, phylo_distances_NF, abundance.weighted = TRUE)
+observed_beta_matrix_NF <- as.matrix(observed_beta_NF) # convert to matrix
+
+null_model_runs <- 999
+test_null_NF <- randomizeMatrix(NF_t, null.model = "independentswap")
+test_beta_NF <- comdistnt(test_null_NF, phylo_distances_NF, abundance.weighted = TRUE)
+
+null_beta_list_NF <- replicate(null_model_runs, 
+                                comdistnt(randomizeMatrix(NF_t, null.model = "independentswap"), 
+                                          phylo_distances_NF, 
+                                          abundance.weighted = TRUE), 
+                                simplify = FALSE)
+
+null_beta_NF <- array(unlist(null_beta_list_NF), 
+                      dim = c(nrow(NF_t), nrow(NF_t), null_model_runs))
+
+null_beta_mean_NF <- apply(null_beta_NF, c(1, 2), mean)
+null_beta_sd_NF <- apply(null_beta_NF, c(1, 2), sd)
+
+beta_nti_NF <- (observed_beta_matrix_NF - null_beta_mean_NF) / null_beta_sd_NF
+beta_nti_symmetric_NF <- (beta_nti_NF + t(beta_nti_NF)) / 2
+diag(beta_nti_symmetric_NF) <- 0
+all(beta_nti_symmetric_NF == t(beta_nti_symmetric_NF))  # Should be TRUE
+beta_nti_symmetric_NF
+
+# Extract lower triangle of the symmetric βNTI matrix
+lower_triangle_indices_NF <- lower.tri(beta_nti_symmetric_NF)
+beta_nti_lower_NF <- beta_nti_symmetric_NF[lower_triangle_indices_NF]
+
+# Create data frame and filter for significant βNTI values
+beta_nti_lower_long_NF <- data.frame(βNTI = beta_nti_lower_NF)
+beta_nti_lower_long_NF$Forest_types <- "NF"  # Changed from "AF" to "NF"
+
+# Classify each pairwise βNTI as deterministic or stochastic
+beta_nti_lower_long_NF$Process <- ifelse(
+  abs(beta_nti_lower_long_NF$βNTI) > 2, "Deterministic", "Stochastic"
+)
+
+# Calculate proportions
+process_proportions_NF <- prop.table(table(beta_nti_lower_long_NF$Process))
+
+# View proportions
+print(process_proportions_NF)
+write_xlsx(beta_nti_lower_long_NF, "Total_fungi/dataset2/assembly/bNTI_NF.xlsx")
+```
+
+```{r}
+library(ggpubr)
+library(dplyr)
+assembly <- read.csv("Total_fungi/dataset2/assembly/assembly.csv", header = TRUE)
+assembly$Forest_types <- factor (assembly$Forest_types, levels = c("NF", "AF"))
+
+bNTI_plot <- ggplot(assembly, aes(x = Forest_types, y = βNTI)) +
+  geom_boxplot(outlier.shape = NA, fill = "transparent") +
+  geom_jitter(
+    width = 0.1, alpha = 0.3, size = 2,
+    aes(color = ifelse(βNTI >= -2 & βNTI <= 2, "yellow3", "grey"))
+  ) +
+  scale_color_identity() +  # Use actual color values directly
+  geom_hline(yintercept = c(-2, 2), linetype = "dashed", color = "grey50") +
+  coord_cartesian(ylim = c(-4, 6)) +
+  theme_minimal() +
+  labs(x = "Forest type", y = "βNTI") +
+  theme_pubr(border = TRUE) +
+  theme(
+    plot.title = element_text(size = 10, hjust = 0.5),  
+    axis.title = element_text(size = 10, color = "black"),                
+    axis.text = element_text(size = 8, color = "black"),                 
+    legend.text = element_text(size = 8),               
+    legend.title = element_text(size = 10),
+    legend.position = "none",
+    legend.key = element_blank()
+  )
+bNTI_plot
+
+
+# Calculate proportions manually
+assembly_prop <- assembly %>%
+  group_by(Forest_types, Process) %>%
+  summarise(count = n()) %>%
+  group_by(Forest_types) %>%
+  mutate(proportion = count / sum(count))
+
+assembly_prop$Percentage <- assembly_prop$proportion * 100
+
+# Create the stacked bar plot with calculated proportions
+stochastic_deterministic_plot <- ggplot(assembly_prop, aes(x = Forest_types, y = Percentage, fill = Process)) +
+  geom_bar(stat = "identity", alpha = 0.7) +
+  labs(x = "Forest type", y = "Relative importance", fill = "Assembly process          ") +
+  scale_fill_manual(values = c('Stochastic' = 'yellow3', 'Deterministic' = 'grey')) +  # Custom colors
+  theme_minimal() +
+  theme_pubr(border = TRUE) +
+  theme(
+    plot.title = element_text(size = 10, hjust = 0.5),  
+    axis.title = element_text(size = 10, color = "black"),                
+    axis.text = element_text(size = 8, color = "black"),                 
+    legend.text = element_text(size = 8),               
+    legend.title = element_text(size = 10),
+    legend.position = "right",
+    legend.key = element_blank(),
+    plot.margin = margin(20, 10, 10, 50)
+  )+scale_y_continuous(expand = expansion(mult = c(0.01, 0.15)), labels = scales::percent_format(scale = 1))
+
+
+# Display the plot
+print(stochastic_deterministic_plot)
+
+
+
+
+# Read the data (make sure to adjust the path to your actual file)
+assembly_process <- read.csv("Total_fungi/dataset2/assembly/assembly_process.csv", header = TRUE)
+
+# Adjust factor levels
+assembly_process$Assembly_process <- factor(assembly_process$Assembly_process, levels = c('Heterogenous selection', 'Homogenous selection', 'Homogenizing dispersal', 'Dispersal limitation', 'Drift'))
+assembly_process$Forest <- factor(assembly_process$Forest, levels = c('NF', 'AF'))
+
+# Convert proportion to percentage
+assembly_process$Percentage <- assembly_process$Proportion * 100
+
+# Define custom color palette (ensure all keys are unique)
+custom_palette <- c(
+  'Heterogenous selection' = 'grey', 
+  'Homogenous selection' = 'grey40', 
+  'Homogenizing dispersal' = 'yellow3', 
+  'Drift' = 'khaki', 
+  'Dispersal limitation' = 'yellow2'
+)
+
+# Create the stacked bar plot with percentages
+assemply_process_plot <- ggplot(assembly_process, aes(x = Forest, y = Percentage, fill = Assembly_process)) +
+  geom_bar(stat = "identity", alpha = 0.7) +
+  labs(x = "Forest type", y = "Relative importance", fill = "Assembly process") +
+  scale_fill_manual(values = custom_palette) +  # Apply custom color palette
+  theme_pubr(border = TRUE) +  # Apply the pubr theme with borders
+  theme(
+    plot.title = element_text(size = 10, hjust = 0.5),  
+    axis.title = element_text(size = 10, color = "black"),                
+    axis.text = element_text(size = 8, color = "black"),                 
+    legend.text = element_text(size = 8),               
+    legend.title = element_text(size = 10),
+    legend.position = "right",
+    legend.key = element_blank(),
+    plot.margin = margin(20, 50, 10, 10)
+  ) + 
+  scale_y_continuous(expand = expansion(mult = c(0.01, 0.15)), labels = scales::percent_format(scale = 1))  # Format y-axis as percentage
+```
+
+```{r}
+library(gridExtra)
+combine_assembly <- grid.arrange(
+  NF_community_assembly_total_fungi, 
+  AF_community_assembly_total_fungi, 
+  bNTI_plot,nrow = 1, 
+  ncol = 3)
+
+combine_assembly2 <- grid.arrange(
+  stochastic_deterministic_plot, 
+  assemply_process_plot, nrow = 1, 
+  ncol = 2)
+
+combine_assembly3 <- grid.arrange(combine_assembly, 
+                                   combine_assembly2, 
+                                   nrow = 2, ncol = 1) 
+  
+
+
+ggsave(
+  filename = "Total_fungi/dataset2/assembly/Assembly.jpg",  # Add file extension
+  plot = combine_assembly3,
+  dpi = 800,
+  height = 5,
+  width = 8,
+  units = "in"  # Optional, but explicit
+)
+```
+
+# Raup_crick
+
+```{r}
+raup_crick=function(spXsite, plot_names_in_col1=TRUE, classic_metric=FALSE, split_ties=TRUE, reps=9999, set_all_species_equal=FALSE, as.distance.matrix=TRUE, report_similarity=FALSE){
+	
+	if(plot_names_in_col1){
+		row.names(spXsite)<-spXsite[,1]
+		spXsite<-spXsite[,-1]
+		}
+	
+	n_sites<-nrow(spXsite)
+	gamma<-ncol(spXsite)
+	
+	ceiling(spXsite/max(spXsite))->spXsite
+	
+	occur<-apply(spXsite, MARGIN=2, FUN=sum)
+	
+	if(set_all_species_equal){
+		occur<-rep(1,gamma)
+		}
+	
+		alpha_levels<-sort(unique(apply(spXsite, MARGIN=1, FUN=sum)))
+
+	alpha_table<-data.frame(c(NA), c(NA))
+	names(alpha_table)<-c("smaller_alpha", "bigger_alpha")
+	col_count<-1
+	
+	null_array<-list()
+	
+	for(a1 in 1:length(alpha_levels)){
+		for(a2 in a1:length(alpha_levels)){
+			
+			null_shared_spp<-NULL
+			for(i in 1:reps){
+				
+				com1<-rep(0,gamma)
+				com2<-rep(0,gamma)
+				
+				com1[sample(1:gamma, alpha_levels[a1], replace=FALSE, prob=occur)]<-1
+				
+				com2[sample(1:gamma, alpha_levels[a2], replace=FALSE, prob=occur)]<-1
+				
+				null_shared_spp[i]<-sum((com1+com2)>1)
+				
+				}
+			
+			null_array[[col_count]]<-null_shared_spp
+			
+			alpha_table[col_count, which(names(alpha_table)=="smaller_alpha")]<-alpha_levels[a1]
+			alpha_table[col_count, which(names(alpha_table)=="bigger_alpha")]<-alpha_levels[a2]
+			
+			col_count<-col_count+1
+			
+			
+			
+			}
+	
+		}
+	
+	alpha_table$matching<-paste(alpha_table[,1], alpha_table[,2], sep="_")
+
+	results<-matrix(data=NA, nrow=n_sites, ncol=n_sites, dimnames=list(row.names(spXsite), row.names(spXsite)))
+
+	for(i in 1:n_sites){
+		for(j in 1:n_sites){
+			
+			n_shared_obs<-sum((spXsite[i,]+spXsite[j,])>1)
+			
+			obs_a1<-sum(spXsite[i,])
+			obs_a2<-sum(spXsite[j,])
+			
+			obs_a_pair<-sort(c(obs_a1, obs_a2))
+			
+			null_index<-which(alpha_table$matching==paste(obs_a_pair[1], obs_a_pair[2], sep="_"))
+			
+			num_exact_matching_in_null<-sum(null_array[[null_index]]==n_shared_obs)
+			
+			num_greater_in_null<-sum(null_array[[null_index]]>n_shared_obs)
+			
+			rc<-(num_greater_in_null)/reps
+			
+			if(split_ties){
+				
+				rc<-((num_greater_in_null+(num_exact_matching_in_null)/2)/reps)
+				}
+			
+			if(!classic_metric){
+					
+					rc<-(rc-.5)*2
+			}
+			
+			if(report_similarity & !classic_metric){
+				rc<- rc*-1
+				}
+		
+			if(report_similarity & classic_metric){
+				rc<- 1-rc
+				}
+		
+			results[i,j]<-round(rc, digits=2)
+			
+			
+			}
+		}
+
+if(as.distance.matrix){
+	results<-as.dist(results)
+	}	
+	
+return(results)
+		}
+
+```
+
+```{r}
+AF <- read.csv("Total_fungi/dataset2/AF.csv", row.names = 1, header = TRUE)
+# Total number of sequences per sample (given)
+total_sequences <- 34300
+
+# Convert to relative abundance by dividing each count by the total number of sequences
+AF_relative_abundance <- AF / total_sequences
+
+# Check the result
+head(AF_relative_abundance)
+
+AF_t <- t(AF_relative_abundance)
+community_matrix <- as.matrix(AF_t)  
+raup_crick_index <- raup_crick(community_matrix)
+raup_crick_index_matrix <- as.matrix(raup_crick_index)
+rc_df <- as.data.frame(as.table(raup_crick_index_matrix))
+names(rc_df) <- c("Row", "Column", "value")
+dispersal_lim_threshold <- 0.95  
+ecological_drift_threshold <- 0.95  
+rc_df$process_type <- ifelse(rc_df$value > dispersal_lim_threshold, "Dispersal Limitation", 
+                              ifelse(abs(rc_df$value) <= ecological_drift_threshold, "Ecological Drift", "Homogeneous Dispersal"))
+dispersal_lim_proportion <- mean(rc_df$process_type == "Dispersal Limitation")  
+ecological_drift_proportion <- mean(rc_df$process_type == "Ecological Drift")  
+homogeneous_dispersal_proportion <- mean(rc_df$process_type == "Homogeneous Dispersal") 
+cat("Proportion of Homogeneous Dispersal: ", homogeneous_dispersal_proportion, "\n")
+cat("Proportion of Ecological Drift: ", ecological_drift_proportion, "\n")
+cat("Proportion of Dispersal Limitation: ", dispersal_lim_proportion, "\n")
+
+## NF
+NF <- read.csv("Total_fungi/dataset2/NF.csv", row.names = 1, header = TRUE)
+# Total number of sequences per sample (given)
+total_sequences <- 34300
+
+# Convert to relative abundance by dividing each count by the total number of sequences
+NF_relative_abundance <- NF / total_sequences
+
+# Check the result
+head(NF_relative_abundance)
+
+NF_t <- t(NF_relative_abundance)
+community_matrix <- as.matrix(NF_t) 
+raup_crick_index <- raup_crick(community_matrix)
+raup_crick_index_matrix <- as.matrix(raup_crick_index)
+rc_df <- as.data.frame(as.table(raup_crick_index_matrix))
+names(rc_df) <- c("Row", "Column", "value")
+dispersal_lim_threshold <- 0.95  
+ecological_drift_threshold <- 0.95  
+rc_df$process_type <- ifelse(rc_df$value > dispersal_lim_threshold, "Dispersal Limitation", 
+                              ifelse(abs(rc_df$value) <= ecological_drift_threshold, "Ecological Drift", "Homogeneous Dispersal"))
+dispersal_lim_proportion <- mean(rc_df$process_type == "Dispersal Limitation")  
+ecological_drift_proportion <- mean(rc_df$process_type == "Ecological Drift")  
+homogeneous_dispersal_proportion <- mean(rc_df$process_type == "Homogeneous Dispersal") 
+cat("Proportion of Homogeneous Dispersal: ", homogeneous_dispersal_proportion, "\n")
+cat("Proportion of Ecological Drift: ", ecological_drift_proportion, "\n")
+cat("Proportion of Dispersal Limitation: ", dispersal_lim_proportion, "\n")
+```
+
+# Niche breadth
+
+```{r}
+library(MicroNiche)
+
+total_fungi <- read.csv("Total_fungi/dataset2/dataset2.csv", row.names = 1, header = TRUE)
+total_fungi_t <- t(total_fungi)
+spec_gen_classification <- spec.gen(total_fungi_t, niche.width.method = "levins", perm.method = "quasiswap", n = 1000, probs = c(0.025, 0.975))
+
+spec_gen_classification_df <- as.data.frame(spec_gen_classification)
+spec_gen_classification_df$Row_Name <- rownames(spec_gen_classification_df)
+
+# Reorder the columns so that the Row_Name comes first
+spec_gen_classification_df <- spec_gen_classification_df[, c("Row_Name", setdiff(names(spec_gen_classification_df), "Row_Name"))]
+
+# Export to Excel
+write_xlsx(spec_gen_classification_df, path = "Total_fungi/dataset2/Niche_analysis/spec_gen_classification.xlsx")
+
+```
+
+# Mean relative abundance vs. frequency
+
+```{r}
+niche_breadth <- read.csv("Total_fungi/dataset2/Niche_analysis/niche_breadth.csv", header = TRUE)
+
+RM_niche <- niche_breadth[1:3773,]
+NF_niche <- niche_breadth[3774:8403,]
+AF_niche <- niche_breadth[8404:13272,]
+SF_niche <- niche_breadth[13273:20064,]
+
+# For RM
+RM_niche$Average_RA_log <- log(RM_niche$Average_RA)
+category_proportions_RM <- prop.table(table(RM_niche$category))
+category_proportions_df_RM <- as.data.frame(category_proportions_RM)
+colnames(category_proportions_df_RM) <- c("category", "proportion")
+category_proportions_df_RM$label <- paste0(category_proportions_df_RM$category, ": ", round(category_proportions_df_RM$proportion * 100, 2), "%")
+category_proportions_df_RM
+
+RM_niche_plot <- ggplot(RM_niche, aes(x = Average_RA_log, y = Niche_breadth, color = category)) +
+  geom_point(alpha = 0.3) +
+  scale_color_brewer(palette = "Set2") +
+  labs(x = "log(mean relative abundance)", y = "Niche breadth") +
+  theme_pubr(border = TRUE) + 
+  theme(legend.position = "none") +
+  geom_hline(yintercept = 1.5, linetype = "dashed", color = "grey60") +
+  geom_hline(yintercept = 3, linetype = "dashed", color = "grey60") +
+  annotate("text", x = -2, y = 24, label = paste("Generalist: 32.6%")) +
+  annotate("text", x = -2, y = -1, label = paste("Specialist: 35.3%")) +
+  scale_y_continuous(expand = expansion(mult = c(0.1, 0.1)))
+RM_niche_plot
+
+# For NF
+NF_niche$Average_RA_log <- log(NF_niche$Average_RA)
+category_proportions_NF <- prop.table(table(NF_niche$category))
+category_proportions_df_NF <- as.data.frame(category_proportions_NF)
+colnames(category_proportions_df_NF) <- c("category", "proportion")
+category_proportions_df_NF$label <- paste0(category_proportions_df_NF$category, ": ", round(category_proportions_df_NF$proportion * 100, 2), "%")
+category_proportions_df_NF
+NF_niche_plot <- ggplot(NF_niche, aes(x = Average_RA_log, y = Niche_breadth, color = category)) +
+  geom_point(alpha = 0.3) +
+  scale_color_brewer(palette = "Set2") +
+  labs(x = "log(mean relative abundance)", y = "Niche breadth") +
+  theme_pubr(border = TRUE) + 
+  theme(legend.position = "none",
+        axis.title = element_text(size = 10),
+        axis.text = element_text(size = 10)) +
+  geom_hline(yintercept = 1.5, linetype = "dashed", color = "grey60") +
+  geom_hline(yintercept = 3, linetype = "dashed", color = "grey60") +
+  annotate("text", x = -2, y = 24, label = paste("Generalist: 32.7%"), size = 2.5) +
+  annotate("text", x = -2, y = -1, label = paste("Specialist: 35.4%"), size = 2.5) +
+  scale_y_continuous(expand = expansion(mult = c(0.1, 0.1)))
+
+# For AF
+AF_niche$Average_RA_log <- log(AF_niche$Average_RA)
+category_proportions_AF <- prop.table(table(AF_niche$category))
+category_proportions_df_AF <- as.data.frame(category_proportions_AF)
+colnames(category_proportions_df_AF) <- c("category", "proportion")
+category_proportions_df_AF$label <- paste0(category_proportions_df_AF$category, ": ", round(category_proportions_df_AF$proportion * 100, 2), "%")
+category_proportions_df_AF
+
+AF_niche_plot <- ggplot(AF_niche, aes(x = Average_RA_log, y = Niche_breadth, color = category)) +
+  geom_point(alpha = 0.3) +
+  scale_color_brewer(palette = "Set2") +
+  labs(x = "log(mean relative abundance)", y = "Niche breadth") +
+  theme_pubr(border = TRUE) + 
+  theme(legend.position = "none",
+        axis.title = element_text(size = 10),
+        axis.text = element_text(size = 10)) +
+  geom_hline(yintercept = 1.5, linetype = "dashed", color = "grey60") +
+  geom_hline(yintercept = 3, linetype = "dashed", color = "grey60") +
+  annotate("text", x = -2, y = 24, label = paste("Generalist: 30.6%"), size = 2.5) +
+  annotate("text", x = -2, y = -1, label = paste("Specialist: 36.5%"), size = 2.5) +
+  scale_y_continuous(expand = expansion(mult = c(0.1, 0.1)))
+
+
+SF_niche$Average_RA_log <- log(SF_niche$Average_RA)
+category_proportions <- prop.table(table(SF_niche$category))
+category_proportions_df <- as.data.frame(category_proportions)
+colnames(category_proportions_df) <- c("category", "proportion")
+category_proportions_df$label <- paste0(category_proportions_df$category, ": ", round(category_proportions_df$proportion * 100, 2), "%")
+category_proportions_df
+SF_niche_plot <- ggplot(SF_niche, aes(x = Average_RA_log, y = Niche_breadth, color = category)) +
+  geom_point(alpha = 0.3) +
+  scale_color_brewer(palette = "Set2")+
+  labs(x = "log(mean relative abundance)", y = "Niche breadth") +
+  theme_pubr(border = TRUE)+ 
+  theme(legend.position = "none")+
+  geom_hline(yintercept = 1.5, linetype = "dashed", color = "grey60")+
+  geom_hline(yintercept = 3, linetype = "dashed", color = "grey60")+
+  annotate("text", x = -2, y = 24, label = paste("Generalist: 42.22%")) +
+  annotate("text", x = -2, y = -1, label = paste("Specialist: 23.8%")) +
+  scale_y_continuous(expand = expansion(mult = c(0.1, 0.1)))
+
+combine_plot <- grid.arrange(NF_niche_plot,
+                             AF_niche_plot,
+                              nrow = 1, ncol = 2)
+
+ggsave("Figures/Generalist_specialist.tiff",
+  plot = combine_plot,
+  dpi = 800,
+  height = 2,
+  width = 5
+)
+
+```
+
+```{r}
+
+niche_breadth$Forest_Season <- paste(
+  niche_breadth$Forest, 
+  niche_breadth$Season, sep = " - ")
+
+niche_breadth$Forest <- factor(niche_breadth$Forest, 
+                                levels = c("RM", "NF", "AF", "SF"))
+niche_breadth$Forest_Season <- factor(
+ niche_breadth$Forest_Season, levels = c("RM - Wet", "RM - Dry",  
+               "NF - Wet" , "NF - Dry" , 
+              "AF - Wet", "AF - Dry" ,
+             "SF - Wet" , "SF - Dry" ))
+# Load necessary libraries
+library(emmeans)
+library(ggplot2)
+
+# Fit the model
+model <- glm(Niche_breadth ~ Forest * Season, family = Gamma(link = "log"), data = niche_breadth)
+
+# Compute marginal means and 95% confidence intervals
+emm <- emmeans(model, ~ Forest * Season, type = "response")
+# Convert emmeans object to a data frame
+emm_df <- as.data.frame(emm)
+emm_df$Forest_Season <- paste(
+  emm_df$Forest, 
+  emm_df$Season, sep = " - ")
+emm_df$Forest_Season <- factor(
+  emm_df$Forest_Season, levels = c("RM - Wet", "RM - Dry",  
+               "NF - Wet" , "NF - Dry" , 
+               "AF - Wet", "AF - Dry" ,
+               "SF - Wet" , "SF - Dry" ))
+
+Plot_niche_breadth <- ggplot()+
+  geom_point(data = emm_df, 
+             aes(x = Forest, 
+                 y = response, 
+                 color = Forest_Season), 
+             size = 2.5, 
+             shape = 16,
+             alpha = 0.7, 
+             position = position_dodge(width = 0.5)) + 
+  geom_errorbar(data = emm_df, 
+                aes(x = Forest, 
+                    ymin = lower.CL, 
+                    ymax = upper.CL, 
+                    color = Forest_Season),
+                width = 0.2, 
+                linewidth = 0.4,
+                position = position_dodge(width = 0.5)) +
+  ylab("Niche breadth ") +
+  xlab("Forest type") +
+  theme(legend.position = "none",
+        axis.title = element_text(size = 10),
+        axis.text = element_text(size = 9),
+        axis.line = element_line(size = 0.05), 
+        panel.grid = element_blank(),
+        panel.background = element_rect(fill = "transparent", 
+                                        color = "black",size = 0.5)) +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.2))) +
+  scale_color_manual(
+    values = c("RM - Wet" = "green4", 
+               "RM - Dry" = "orange3",
+               "NF - Wet" = "green4", 
+               "NF - Dry" = "orange3", 
+              "AF - Wet" = "green4", 
+               "AF - Dry" = "orange3",
+             "SF - Wet" = "green4", 
+               "SF - Dry" = "orange3"))
+Plot_niche_breadth
+ggsave("Figures/Niche_breadth.tiff", dpi = 800, height = 3, width = 3)
+```
